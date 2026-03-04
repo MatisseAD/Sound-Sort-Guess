@@ -50,6 +50,19 @@ export default function Quiz() {
     
     const generator = getAlgorithmGenerator(algo, newArray);
     
+    // Speed depends on array size and algorithm to keep it under 5-10s
+    const speedMap: Record<string, number> = {
+      'Bubble Sort': 10,
+      'Quick Sort': 30,
+      'Merge Sort': 30,
+      'Insertion Sort': 15,
+      'Selection Sort': 15,
+      'Cocktail Sort': 10,
+      'Heap Sort': 30,
+      'Shell Sort': 25
+    };
+    const speed = speedMap[algo] || 20;
+
     for (const state of generator) {
       if (!isComponentMounted.current || !playbackRef.current) break;
       
@@ -60,8 +73,7 @@ export default function Quiz() {
         audio.playTone(state.array[idx], 100);
       });
       
-      // Speed depends on array size and algorithm to keep it under 5-10s
-      await new Promise(r => setTimeout(r, algo === 'Bubble Sort' ? 20 : 40));
+      await new Promise(r => setTimeout(r, speed));
     }
     
     if (isComponentMounted.current && playbackRef.current) {

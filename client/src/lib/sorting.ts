@@ -8,7 +8,10 @@ export const ALGORITHMS = [
   'Quick Sort',
   'Merge Sort',
   'Insertion Sort',
-  'Selection Sort'
+  'Selection Sort',
+  'Cocktail Sort',
+  'Heap Sort',
+  'Shell Sort'
 ] as const;
 
 export type AlgorithmName = typeof ALGORITHMS[number];
@@ -28,7 +31,97 @@ export function* bubbleSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
-export function* selectionSort(arr: number[]): Generator<SortState> {
+export function* cocktailSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  let swapped = true;
+  let start = 0;
+  let end = a.length - 1;
+
+  while (swapped) {
+    swapped = false;
+    for (let i = start; i < end; ++i) {
+      yield { array: [...a], active: [i, i + 1] };
+      if (a[i] > a[i + 1]) {
+        [a[i], a[i + 1]] = [a[i + 1], a[i]];
+        swapped = true;
+        yield { array: [...a], active: [i, i + 1] };
+      }
+    }
+
+    if (!swapped) break;
+
+    swapped = false;
+    --end;
+
+    for (let i = end - 1; i >= start; --i) {
+      yield { array: [...a], active: [i, i + 1] };
+      if (a[i] > a[i + 1]) {
+        [a[i], a[i + 1]] = [a[i + 1], a[i]];
+        swapped = true;
+        yield { array: [...a], active: [i, i + 1] };
+      }
+    }
+    ++start;
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* heapSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+
+  function* heapify(n: number, i: number): Generator<SortState> {
+    let largest = i;
+    const l = 2 * i + 1;
+    const r = 2 * i + 2;
+
+    const currentActive = [i];
+    if (l < n) currentActive.push(l);
+    if (r < n) currentActive.push(r);
+    yield { array: [...a], active: currentActive };
+
+    if (l < n && a[l] > a[largest]) largest = l;
+    if (r < n && a[r] > a[largest]) largest = r;
+
+    if (largest !== i) {
+      [a[i], a[largest]] = [a[largest], a[i]];
+      yield { array: [...a], active: [i, largest] };
+      yield* heapify(n, largest);
+    }
+  }
+
+  for (let i = Math.floor(n / 2) - 1; i >= 0; i--) {
+    yield* heapify(n, i);
+  }
+
+  for (let i = n - 1; i > 0; i--) {
+    [a[0], a[i]] = [a[i], a[0]];
+    yield { array: [...a], active: [0, i] };
+    yield* heapify(i, 0);
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* shellSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+
+  for (let gap = Math.floor(n / 2); gap > 0; gap = Math.floor(gap / 2)) {
+    for (let i = gap; i < n; i++) {
+      const temp = a[i];
+      let j;
+      for (j = i; j >= gap && a[j - gap] > temp; j -= gap) {
+        yield { array: [...a], active: [j, j - gap] };
+        a[j] = a[j - gap];
+      }
+      a[j] = temp;
+      yield { array: [...a], active: [j] };
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function selectionSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
   for (let i = 0; i < n - 1; i++) {
@@ -156,6 +249,9 @@ export function getAlgorithmGenerator(name: AlgorithmName, arr: number[]): Gener
     case 'Merge Sort': return mergeSort(arr);
     case 'Insertion Sort': return insertionSort(arr);
     case 'Selection Sort': return selectionSort(arr);
+    case 'Cocktail Sort': return cocktailSort(arr);
+    case 'Heap Sort': return heapSort(arr);
+    case 'Shell Sort': return shellSort(arr);
     default: return bubbleSort(arr);
   }
 }
