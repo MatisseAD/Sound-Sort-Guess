@@ -7,6 +7,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { ALGORITHMS, generateRandomArray } from "../client/src/lib/sorting";
 import { nanoid } from "nanoid";
 
+const ROUND_TIMEOUT_MS = 90_000;
+
 interface Client extends WebSocket {
   id?: string;
   roomId?: string;
@@ -24,6 +26,7 @@ export async function registerRoutes(
     status: "waiting" | "playing";
     currentAlgo?: string;
     array?: number[];
+    roundTimeout?: ReturnType<typeof setTimeout>;
     players: Map<string, { id: string, name: string, score: number, ready: boolean, socket: Client }>;
   }>();
 
@@ -82,17 +85,7 @@ export async function registerRoutes(
             const { algo } = wsSchema.send.guess.parse(message.payload);
             const player = room.players.get(ws.id);
             if (player && algo === room.currentAlgo) {
-              player.score += 10;
-              room.status = "waiting";
-              // Reset ready states
-              room.players.forEach(p => p.ready = false);
-              
-              broadcast(ws.roomId, "roundResult", { 
-                winner: player.name, 
-                correctAlgo: room.currentAlgo 
-              });
-              
-              setTimeout(() => broadcastRoom(ws.roomId), 3000);
+              endRound(ws.roomId, player.name);
             }
           }
         }
@@ -107,6 +100,7 @@ export async function registerRoutes(
         if (room) {
           room.players.delete(ws.id);
           if (room.players.size === 0) {
+            if (room.roundTimeout) clearTimeout(room.roundTimeout);
             rooms.delete(ws.roomId);
           } else {
             broadcastRoom(ws.roomId);
@@ -139,16 +133,46 @@ export async function registerRoutes(
       }));
       
       room.players.forEach(p => {
-        p.socket.send(JSON.stringify({
-          type: "roomUpdate",
-          payload: {
-            room: { id: room.id, status: room.status },
-            players: playersList,
-            me: { id: p.id }
-          }
-        }));
+        if (p.socket.readyState === WebSocket.OPEN) {
+          p.socket.send(JSON.stringify({
+            type: "roomUpdate",
+            payload: {
+              room: { id: room.id, status: room.status },
+              players: playersList,
+              me: { id: p.id }
+            }
+          }));
+        }
       });
     }
+  }
+
+  function endRound(roomId: string, winnerName?: string) {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== "playing") return;
+
+    // Clear the round timeout if it's still pending
+    if (room.roundTimeout) {
+      clearTimeout(room.roundTimeout);
+      room.roundTimeout = undefined;
+    }
+
+    // Award point to winner
+    if (winnerName) {
+      room.players.forEach(p => {
+        if (p.name === winnerName) p.score += 10;
+      });
+    }
+
+    room.status = "waiting";
+    room.players.forEach(p => p.ready = false);
+
+    broadcast(roomId, "roundResult", {
+      winner: winnerName ?? null,
+      correctAlgo: room.currentAlgo
+    });
+
+    setTimeout(() => broadcastRoom(roomId), 3000);
   }
 
   function startRoomGame(roomId: string) {
@@ -159,7 +183,10 @@ export async function registerRoutes(
       room.status = "playing";
       room.currentAlgo = algo;
       room.array = array;
-      
+
+      // Timeout: end round automatically after 90 seconds if nobody guesses correctly
+      room.roundTimeout = setTimeout(() => endRound(roomId, undefined), ROUND_TIMEOUT_MS);
+
       broadcast(roomId, "gameStart", { algo, array });
     }
   }
