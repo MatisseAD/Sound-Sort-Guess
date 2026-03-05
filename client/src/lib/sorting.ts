@@ -121,7 +121,7 @@ export function* shellSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
-export function selectionSort(arr: number[]): Generator<SortState> {
+export function* selectionSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
   for (let i = 0; i < n - 1; i++) {
