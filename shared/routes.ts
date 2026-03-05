@@ -32,6 +32,25 @@ export const api = {
   },
 };
 
+export const ws = {
+  // Client to Server
+  send: {
+    joinRoom: z.object({ playerName: z.string(), roomId: z.string().optional() }),
+    ready: z.object({}),
+    guess: z.object({ algo: z.string() }),
+  },
+  // Server to Client
+  receive: {
+    roomUpdate: z.object({ 
+      room: z.any(),
+      players: z.array(z.any()),
+      me: z.any()
+    }),
+    gameStart: z.object({ algo: z.string(), array: z.array(z.number()) }),
+    roundResult: z.object({ winner: z.string().optional(), correctAlgo: z.string() }),
+  }
+};
+
 export function buildUrl(path: string, params?: Record<string, string | number>): string {
   let url = path;
   if (params) {
