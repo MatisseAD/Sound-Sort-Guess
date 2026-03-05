@@ -6,7 +6,7 @@ import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName }
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
-import { Volume2, VolumeX, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check } from "lucide-react";
+import { Volume2, VolumeX, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff } from "lucide-react";
 
 type Message = {
   type: string;
@@ -25,6 +25,7 @@ export default function Quiz() {
   
   const [playerName, setPlayerName] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
+  const [hardcoreMode, setHardcoreMode] = useState(false);
   const createScore = useCreateScore();
   
   const isComponentMounted = useRef(true);
@@ -98,7 +99,11 @@ export default function Quiz() {
     const speedMap: Record<string, number> = {
       'Bubble Sort': 10, 'Quick Sort': 30, 'Merge Sort': 30,
       'Insertion Sort': 15, 'Selection Sort': 15, 'Cocktail Sort': 10,
-      'Heap Sort': 30, 'Shell Sort': 25
+      'Heap Sort': 30, 'Shell Sort': 25,
+      'Gnome Sort': 15, 'Comb Sort': 15, 'Counting Sort': 20,
+      'Radix Sort': 20, 'Odd-Even Sort': 10, 'Pancake Sort': 20,
+      // Stooge Sort generates ~10k steps for n=40; 3ms keeps the round length comparable
+      'Cycle Sort': 15, 'Tim Sort': 20, 'Bitonic Sort': 20, 'Stooge Sort': 3,
     };
     const speed = speedMap[algo] || 20;
 
@@ -116,10 +121,13 @@ export default function Quiz() {
     }
   };
 
-  const startRound = () => handleStartRound(
-    ALGORITHMS[Math.floor(Math.random() * ALGORITHMS.length)],
-    generateRandomArray(40)
-  );
+  const startRound = (hardcore = false) => {
+    setHardcoreMode(hardcore);
+    handleStartRound(
+      ALGORITHMS[Math.floor(Math.random() * ALGORITHMS.length)],
+      generateRandomArray(40)
+    );
+  };
 
   const handleGuess = (algo: AlgorithmName) => {
     if (gameState !== 'playing' && gameState !== 'guessing') return;
@@ -143,7 +151,7 @@ export default function Quiz() {
         colors: ['#8B5CF6', '#D946EF', '#ffffff']
       });
       setScore(s => s + 1);
-      setTimeout(() => isComponentMounted.current && startRound(), 2000);
+      setTimeout(() => isComponentMounted.current && startRound(hardcoreMode), 2000);
     } else {
       setTimeout(() => isComponentMounted.current && setGameState('gameover'), 2000);
     }
@@ -179,8 +187,13 @@ export default function Quiz() {
         
         {/* Header */}
         <div className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl">
-          <div className="text-xl font-bold">
+          <div className="text-xl font-bold flex items-center gap-2">
             {room ? `Room: ${room.id}` : `Score: ${score}`}
+            {hardcoreMode && (
+              <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30">
+                Hardcore
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {room && (
@@ -211,8 +224,11 @@ export default function Quiz() {
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-2xl p-6 space-y-4">
               {gameState === 'idle' ? (
                 <>
-                  <button onClick={startRound} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
+                  <button onClick={() => startRound(false)} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
                     <Play size={24} /> Solo Mode
+                  </button>
+                  <button onClick={() => startRound(true)} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
+                    <EyeOff size={24} /> Hardcore Mode
                   </button>
                   <div className="w-full max-w-xs space-y-2">
                     <input 
@@ -266,11 +282,23 @@ export default function Quiz() {
               )}
             </div>
           )}
-          <AudioVisualizer array={array.length ? array : generateRandomArray(40)} activeIndices={activeIndices} />
+          {hardcoreMode && (gameState === 'playing' || gameState === 'guessing' || gameState === 'result') ? (
+            <div className="flex items-center justify-center h-48 sm:h-64 w-full rounded-2xl glass-panel bg-black/95 border border-destructive/30">
+              <div className="text-center space-y-3">
+                <div className="text-5xl">🎧</div>
+                <p className="text-muted-foreground text-sm font-medium">No visuals — trust your ears</p>
+                {gameState === 'playing' && (
+                  <span className="text-xs font-bold uppercase tracking-widest text-destructive animate-pulse">● Sorting…</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <AudioVisualizer array={array.length ? array : generateRandomArray(40)} activeIndices={activeIndices} />
+          )}
         </div>
 
         {/* Choices */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {ALGORITHMS.map(algo => {
             const isSelected = selectedAlgo === algo;
             const isCorrect = algo === currentAlgo;
@@ -330,7 +358,7 @@ export default function Quiz() {
                 <button type="submit" disabled={createScore.isPending || !playerName.trim()} className="w-full px-6 py-4 rounded-xl font-bold bg-primary text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
                   {createScore.isPending ? <Loader2 className="animate-spin" size={20} /> : <>Submit Score <ArrowRight size={20} /></>}
                 </button>
-                <button type="button" onClick={() => { setScore(0); setGameState('idle'); }} className="w-full py-2 text-sm text-muted-foreground hover:text-foreground">
+                <button type="button" onClick={() => { setScore(0); setHardcoreMode(false); setGameState('idle'); }} className="w-full py-2 text-sm text-muted-foreground hover:text-foreground">
                   Play Again
                 </button>
               </form>
