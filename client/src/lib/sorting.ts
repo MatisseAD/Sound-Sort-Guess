@@ -11,7 +11,17 @@ export const ALGORITHMS = [
   'Selection Sort',
   'Cocktail Sort',
   'Heap Sort',
-  'Shell Sort'
+  'Shell Sort',
+  'Gnome Sort',
+  'Comb Sort',
+  'Counting Sort',
+  'Radix Sort',
+  'Odd-Even Sort',
+  'Pancake Sort',
+  'Cycle Sort',
+  'Tim Sort',
+  'Bitonic Sort',
+  'Stooge Sort',
 ] as const;
 
 export type AlgorithmName = typeof ALGORITHMS[number];
@@ -242,6 +252,268 @@ export function* mergeSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
+export function* gnomeSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  let i = 0;
+  while (i < a.length) {
+    if (i === 0 || a[i] >= a[i - 1]) {
+      i++;
+    } else {
+      yield { array: [...a], active: [i, i - 1] };
+      [a[i], a[i - 1]] = [a[i - 1], a[i]];
+      yield { array: [...a], active: [i, i - 1] };
+      i--;
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* combSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+  let gap = n;
+  const shrink = 1.3;
+  let sorted = false;
+  while (!sorted) {
+    gap = Math.floor(gap / shrink);
+    if (gap <= 1) { gap = 1; sorted = true; }
+    for (let i = 0; i + gap < n; i++) {
+      yield { array: [...a], active: [i, i + gap] };
+      if (a[i] > a[i + gap]) {
+        [a[i], a[i + gap]] = [a[i + gap], a[i]];
+        sorted = false;
+        yield { array: [...a], active: [i, i + gap] };
+      }
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* countingSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const max = Math.max(...a);
+  const count = new Array(max + 1).fill(0);
+  for (let i = 0; i < a.length; i++) {
+    count[a[i]]++;
+    yield { array: [...a], active: [i] };
+  }
+  let idx = 0;
+  for (let v = 0; v <= max; v++) {
+    while (count[v]-- > 0) {
+      a[idx] = v;
+      yield { array: [...a], active: [idx] };
+      idx++;
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* radixSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const max = Math.max(...a);
+  for (let exp = 1; Math.floor(max / exp) > 0; exp *= 10) {
+    const output = new Array(a.length).fill(0);
+    const count = new Array(10).fill(0);
+    for (let i = 0; i < a.length; i++) {
+      count[Math.floor(a[i] / exp) % 10]++;
+      yield { array: [...a], active: [i] };
+    }
+    for (let i = 1; i < 10; i++) count[i] += count[i - 1];
+    for (let i = a.length - 1; i >= 0; i--) {
+      const digit = Math.floor(a[i] / exp) % 10;
+      output[--count[digit]] = a[i];
+    }
+    for (let i = 0; i < a.length; i++) {
+      a[i] = output[i];
+      yield { array: [...a], active: [i] };
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* oddEvenSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+  let sorted = false;
+  while (!sorted) {
+    sorted = true;
+    for (let i = 1; i < n - 1; i += 2) {
+      yield { array: [...a], active: [i, i + 1] };
+      if (a[i] > a[i + 1]) {
+        [a[i], a[i + 1]] = [a[i + 1], a[i]];
+        sorted = false;
+        yield { array: [...a], active: [i, i + 1] };
+      }
+    }
+    for (let i = 0; i < n - 1; i += 2) {
+      yield { array: [...a], active: [i, i + 1] };
+      if (a[i] > a[i + 1]) {
+        [a[i], a[i + 1]] = [a[i + 1], a[i]];
+        sorted = false;
+        yield { array: [...a], active: [i, i + 1] };
+      }
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* pancakeSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+
+  function* flip(k: number): Generator<SortState> {
+    let left = 0, right = k;
+    while (left < right) {
+      yield { array: [...a], active: [left, right] };
+      [a[left], a[right]] = [a[right], a[left]];
+      yield { array: [...a], active: [left, right] };
+      left++;
+      right--;
+    }
+  }
+
+  for (let size = a.length; size > 1; size--) {
+    let maxIdx = 0;
+    for (let i = 1; i < size; i++) {
+      yield { array: [...a], active: [i, maxIdx] };
+      if (a[i] > a[maxIdx]) maxIdx = i;
+    }
+    if (maxIdx !== size - 1) {
+      if (maxIdx !== 0) yield* flip(maxIdx);
+      yield* flip(size - 1);
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* cycleSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+  for (let cycleStart = 0; cycleStart < n - 1; cycleStart++) {
+    let item = a[cycleStart];
+    let pos = cycleStart;
+    for (let i = cycleStart + 1; i < n; i++) {
+      yield { array: [...a], active: [cycleStart, i] };
+      if (a[i] < item) pos++;
+    }
+    if (pos === cycleStart) continue;
+    while (item === a[pos]) pos++;
+    [a[pos], item] = [item, a[pos]];
+    yield { array: [...a], active: [cycleStart, pos] };
+    while (pos !== cycleStart) {
+      pos = cycleStart;
+      for (let i = cycleStart + 1; i < n; i++) {
+        yield { array: [...a], active: [cycleStart, i] };
+        if (a[i] < item) pos++;
+      }
+      while (item === a[pos]) pos++;
+      [a[pos], item] = [item, a[pos]];
+      yield { array: [...a], active: [cycleStart, pos] };
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* timSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+  const RUN = 8; // standard insertion-sort run size used by Tim Sort
+
+  function* insertRun(left: number, right: number): Generator<SortState> {
+    for (let i = left + 1; i <= right; i++) {
+      const temp = a[i];
+      let j = i - 1;
+      yield { array: [...a], active: [i] };
+      while (j >= left && a[j] > temp) {
+        yield { array: [...a], active: [j, j + 1] };
+        a[j + 1] = a[j];
+        j--;
+      }
+      a[j + 1] = temp;
+    }
+  }
+
+  function* mergeRuns(l: number, m: number, r: number): Generator<SortState> {
+    const left = a.slice(l, m + 1);
+    const right = a.slice(m + 1, r + 1);
+    let i = 0, j = 0, k = l;
+    while (i < left.length && j < right.length) {
+      yield { array: [...a], active: [l + i, m + 1 + j] };
+      if (left[i] <= right[j]) a[k++] = left[i++];
+      else a[k++] = right[j++];
+      yield { array: [...a], active: [k - 1] };
+    }
+    while (i < left.length) { a[k] = left[i++]; yield { array: [...a], active: [k++] }; }
+    while (j < right.length) { a[k] = right[j++]; yield { array: [...a], active: [k++] }; }
+  }
+
+  for (let i = 0; i < n; i += RUN) {
+    yield* insertRun(i, Math.min(i + RUN - 1, n - 1));
+  }
+  for (let size = RUN; size < n; size *= 2) {
+    for (let left = 0; left < n; left += 2 * size) {
+      const mid = Math.min(left + size - 1, n - 1);
+      const right = Math.min(left + 2 * size - 1, n - 1);
+      if (mid < right) yield* mergeRuns(left, mid, right);
+    }
+  }
+  yield { array: [...a], active: [] };
+}
+
+export function* bitonicSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+  const n = a.length;
+
+  function* compAndSwap(i: number, j: number, asc: boolean): Generator<SortState> {
+    yield { array: [...a], active: [i, j] };
+    if (asc ? a[i] > a[j] : a[i] < a[j]) {
+      [a[i], a[j]] = [a[j], a[i]];
+      yield { array: [...a], active: [i, j] };
+    }
+  }
+
+  function* bitonicMerge(lo: number, cnt: number, asc: boolean): Generator<SortState> {
+    if (cnt > 1) {
+      const k = Math.floor(cnt / 2);
+      for (let i = lo; i < lo + k; i++) yield* compAndSwap(i, i + k, asc);
+      yield* bitonicMerge(lo, k, asc);
+      yield* bitonicMerge(lo + k, cnt - k, asc);
+    }
+  }
+
+  function* bitonicSortRec(lo: number, cnt: number, asc: boolean): Generator<SortState> {
+    if (cnt > 1) {
+      const k = Math.floor(cnt / 2);
+      yield* bitonicSortRec(lo, k, true);
+      yield* bitonicSortRec(lo + k, cnt - k, false);
+      yield* bitonicMerge(lo, cnt, asc);
+    }
+  }
+
+  yield* bitonicSortRec(0, n, true);
+  yield { array: [...a], active: [] };
+}
+
+export function* stoogeSort(arr: number[]): Generator<SortState> {
+  const a = [...arr];
+
+  function* stooge(l: number, h: number): Generator<SortState> {
+    yield { array: [...a], active: [l, h] };
+    if (a[l] > a[h]) {
+      [a[l], a[h]] = [a[h], a[l]];
+      yield { array: [...a], active: [l, h] };
+    }
+    if (h - l + 1 > 2) {
+      const t = Math.floor((h - l + 1) / 3);
+      yield* stooge(l, h - t);
+      yield* stooge(l + t, h);
+      yield* stooge(l, h - t);
+    }
+  }
+
+  yield* stooge(0, a.length - 1);
+  yield { array: [...a], active: [] };
+}
+
 export function getAlgorithmGenerator(name: AlgorithmName, arr: number[]): Generator<SortState> {
   switch (name) {
     case 'Bubble Sort': return bubbleSort(arr);
@@ -252,6 +524,16 @@ export function getAlgorithmGenerator(name: AlgorithmName, arr: number[]): Gener
     case 'Cocktail Sort': return cocktailSort(arr);
     case 'Heap Sort': return heapSort(arr);
     case 'Shell Sort': return shellSort(arr);
+    case 'Gnome Sort': return gnomeSort(arr);
+    case 'Comb Sort': return combSort(arr);
+    case 'Counting Sort': return countingSort(arr);
+    case 'Radix Sort': return radixSort(arr);
+    case 'Odd-Even Sort': return oddEvenSort(arr);
+    case 'Pancake Sort': return pancakeSort(arr);
+    case 'Cycle Sort': return cycleSort(arr);
+    case 'Tim Sort': return timSort(arr);
+    case 'Bitonic Sort': return bitonicSort(arr);
+    case 'Stooge Sort': return stoogeSort(arr);
     default: return bubbleSort(arr);
   }
 }
