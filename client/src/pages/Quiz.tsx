@@ -6,7 +6,7 @@ import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName }
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
-import { Volume2, VolumeX, ArrowRight, Loader2, Users, User, Play, CheckCircle2 } from "lucide-react";
+import { Volume2, VolumeX, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check } from "lucide-react";
 
 type Message = {
   type: string;
@@ -24,6 +24,7 @@ export default function Quiz() {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgorithmName | null>(null);
   
   const [playerName, setPlayerName] = useState("");
+  const [roomIdInput, setRoomIdInput] = useState("");
   const createScore = useCreateScore();
   
   const isComponentMounted = useRef(true);
@@ -35,6 +36,7 @@ export default function Quiz() {
   const [players, setPlayers] = useState<any[]>([]);
   const [myId, setMyId] = useState<string>("");
   const [lastWinner, setLastWinner] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     isComponentMounted.current = true;
@@ -153,6 +155,15 @@ export default function Quiz() {
     }
   };
 
+  const copyRoomId = () => {
+    if (room?.id) {
+      navigator.clipboard.writeText(room.id).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    }
+  };
+
   const submitScore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playerName.trim() || createScore.isPending) return;
@@ -203,19 +214,38 @@ export default function Quiz() {
                   <button onClick={startRound} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
                     <Play size={24} /> Solo Mode
                   </button>
-                  <div className="flex w-full max-w-xs gap-2">
+                  <div className="w-full max-w-xs space-y-2">
                     <input 
                       type="text" value={playerName} onChange={e => setPlayerName(e.target.value)} 
-                      placeholder="Your Name" className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none"
+                      placeholder="Your Name" className="w-full px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none"
                     />
-                    <button onClick={() => playerName.trim() && connectMultiplayer(playerName)} className="px-4 py-3 rounded-xl bg-accent text-accent-foreground hover-elevate">
-                      <Users size={24} />
-                    </button>
+                    <div className="flex gap-2">
+                      <input
+                        type="text" value={roomIdInput} onChange={e => setRoomIdInput(e.target.value)}
+                        placeholder="Room ID (optional)" className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
+                      />
+                      <button
+                        onClick={() => connectMultiplayer(playerName, roomIdInput.trim() || undefined)}
+                        disabled={!playerName.trim()}
+                        title={roomIdInput.trim() ? "Join Room" : "Create Room"}
+                        className="px-4 py-3 rounded-xl bg-accent text-accent-foreground hover-elevate disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Users size={24} />
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">Leave Room ID empty to create a new room</p>
                   </div>
                 </>
               ) : (
                 <div className="text-center space-y-4">
                   <h3 className="text-2xl font-bold">Waiting for players...</h3>
+                  <div className="flex items-center justify-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Room ID:</span>
+                    <span className="font-mono font-bold text-primary">{room?.id}</span>
+                    <button onClick={copyRoomId} title="Copy Room ID" className="p-1 rounded hover:bg-white/10 transition-colors">
+                      {copied ? <Check size={16} className="text-success" /> : <Copy size={16} className="text-muted-foreground" />}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     {players.map(p => (
                       <div key={p.id} className="flex items-center gap-2 glass-panel p-3 rounded-xl">
