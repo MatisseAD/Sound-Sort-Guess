@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
-import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName } from "@/lib/sorting";
+import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName, getProgressiveAlgos, getNextUnlockRound, ALGO_PROGRESSION } from "@/lib/sorting";
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
-import { Volume2, VolumeX, ArrowLeft, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff, Crown, X } from "lucide-react";
+import { useAuth, useUpdateStats } from "@/hooks/use-auth";
+import { Volume2, VolumeX, ArrowLeft, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff, Crown, X, Unlock } from "lucide-react";
+import type { VisualizerTheme } from "@/lib/shop";
 
 type Message = {
   type: string;
@@ -25,11 +27,24 @@ export default function Quiz() {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgorithmName | null>(null);
   const [hasGuessed, setHasGuessed] = useState(false);
   const [nextRoundRequested, setNextRoundRequested] = useState(false);
+  const [newUnlock, setNewUnlock] = useState<AlgorithmName[] | null>(null);
   
   const [playerName, setPlayerName] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
   const [hardcoreMode, setHardcoreMode] = useState(false);
   const createScore = useCreateScore();
+  const { data: user } = useAuth();
+  const { mutate: updateStats } = useUpdateStats();
+
+  // Progression: algorithms available for current round
+  const progressiveAlgos = useMemo(
+    () => (gameState === 'idle' || round === 0) ? getProgressiveAlgos(0, false) : getProgressiveAlgos(round, hardcoreMode),
+    [round, hardcoreMode, gameState]
+  );
+  const nextUnlockRound = useMemo(() => getNextUnlockRound(round, hardcoreMode), [round, hardcoreMode]);
+
+  // Equipped theme from user profile
+  const equippedTheme = (user?.equippedTheme ?? 'default') as VisualizerTheme;
 
   const normalizeRoomId = (value: string) =>
     value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
@@ -187,16 +202,30 @@ export default function Quiz() {
     setHardcoreMode(hardcore);
     setSelectedAlgo(null);
     setHasGuessed(false);
+    setNewUnlock(null);
 
+    let nextRound: number;
     if (options?.reset) {
       setScore(0);
       setRound(1);
+      nextRound = 1;
     } else {
-      setRound((r) => r + 1);
+      nextRound = round + 1;
+      setRound(nextRound);
     }
 
+    // Check if a new algorithm group unlocks at this round
+    const interval = hardcore ? 15 : 10;
+    if (!options?.reset && nextRound % interval === 0) {
+      const groupIdx = Math.floor(nextRound / interval);
+      if (groupIdx < ALGO_PROGRESSION.length) {
+        setNewUnlock(ALGO_PROGRESSION[groupIdx]);
+      }
+    }
+
+    const currentProgAlgos = getProgressiveAlgos(nextRound, hardcore);
     handleStartRound(
-      ALGORITHMS[Math.floor(Math.random() * ALGORITHMS.length)],
+      currentProgAlgos[Math.floor(Math.random() * currentProgAlgos.length)],
       generateRandomArray(40)
     );
   };
@@ -223,6 +252,12 @@ export default function Quiz() {
         colors: ['#8B5CF6', '#D946EF', '#ffffff']
       });
       setScore(s => s + 1);
+
+      // Award coins to logged-in user
+      if (user) {
+        const coinsPerCorrect = hardcoreMode ? 15 : 10;
+        updateStats({ scoreToAdd: 1, coinsToAdd: coinsPerCorrect });
+      }
 
       if (nextRoundTimeout.current) {
         window.clearTimeout(nextRoundTimeout.current);
@@ -291,36 +326,41 @@ export default function Quiz() {
   const allReady = players.length > 0 && players.every(p => p.ready);
   const myReady = me?.ready ?? false;
   const readyCount = players.filter(p => p.ready).length;
-  const visibleAlgos = (room?.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : ALGORITHMS) as AlgorithmName[];
+  // In multiplayer use room's allowed algos; in solo use the progressive list
+  const visibleAlgos = (room?.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : progressiveAlgos) as AlgorithmName[];
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-3xl space-y-8 relative">
+    <div className="min-h-screen flex flex-col items-center justify-center p-3 sm:p-4 md:p-6">
+      <div className="w-full max-w-3xl space-y-4 sm:space-y-6 md:space-y-8 relative">
         
         {/* Header */}
-        <div className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl">
-          <div className="flex items-center gap-4">
+        <div className="flex justify-between items-center glass-panel px-3 sm:px-6 py-3 sm:py-4 rounded-2xl">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Link
               href="/"
-              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1 sm:gap-2 text-muted-foreground hover:text-foreground transition-colors shrink-0"
             >
               <ArrowLeft size={18} />
-              <span className="text-sm">Back</span>
+              <span className="text-sm hidden sm:inline">Retour</span>
             </Link>
-            <div className="text-xl font-bold flex items-center gap-2">
-              {room ? `Room: ${room.id}${room.round ? ` · Round ${room.round}/${room.maxRounds}` : ""}` : `Score: ${score}${round ? ` · Round ${round}` : ""}`}
+            <div className="text-base sm:text-xl font-bold flex items-center gap-2 min-w-0">
+              <span className="truncate">
+                {room
+                  ? `Room: ${room.id}${room.round ? ` · ${room.round}/${room.maxRounds}` : ""}`
+                  : `Score: ${score}${round ? ` · R${round}` : ""}`}
+              </span>
               {hardcoreMode && (
-                <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30">
-                  Hardcore
+                <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30 shrink-0">
+                  HC
                 </span>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {room && (
               <div className="flex -space-x-2">
                 {players.map(p => (
-                  <div key={p.id} title={`${p.name}: ${p.score}`} className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${p.id === myId ? 'border-primary bg-primary/20' : 'border-white/20 bg-white/10'}`}>
+                  <div key={p.id} title={`${p.name}: ${p.score}`} className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${p.id === myId ? 'border-primary bg-primary/20' : 'border-white/20 bg-white/10'}`}>
                     {p.name[0].toUpperCase()}
                   </div>
                 ))}
@@ -342,35 +382,37 @@ export default function Quiz() {
         {/* Visualizer */}
         <div className="relative">
           {(gameState === 'idle' || (gameState === 'multiplayer' && room?.status === 'waiting')) && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-2xl p-6 space-y-4">
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-2xl p-4 sm:p-6 space-y-3">
               {gameState === 'idle' ? (
                 <>
-                  <button onClick={() => startRound(false, { reset: true })} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
-                    <Play size={24} /> Solo Mode
+                  <button onClick={() => startRound(false, { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
+                    <Play size={22} /> Mode Normal
                   </button>
-                  <button onClick={() => startRound(true, { reset: true })} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
-                    <EyeOff size={24} /> Hardcore Mode
+                  <p className="text-xs text-muted-foreground text-center -mt-1">Commence avec 5 algos — +1 groupe toutes les 10 manches</p>
+                  <button onClick={() => startRound(true, { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
+                    <EyeOff size={22} /> Mode Hardcore
                   </button>
-                  <div className="w-full max-w-xs space-y-2">
+                  <p className="text-xs text-muted-foreground text-center -mt-1">Pas de visuel — +1 groupe toutes les 15 manches</p>
+                  <div className="w-full max-w-xs space-y-2 pt-1">
                     <input 
                       type="text" value={playerName} onChange={e => setPlayerName(e.target.value)} 
-                      placeholder="Your Name" className="w-full px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none"
+                      placeholder="Votre pseudo" className="w-full px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
                     />
                     <div className="flex gap-2">
                       <input
                         type="text" value={roomIdInput} onChange={e => setRoomIdInput(normalizeRoomId(e.target.value))}
-                        placeholder="Room ID (optional)" maxLength={5} className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
+                        placeholder="Room ID (optionnel)" maxLength={5} className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
                       />
                       <button
                         onClick={() => connectMultiplayer(playerName, roomIdInput.trim() || undefined)}
                         disabled={!playerName.trim() || (roomIdInput !== "" && roomIdInput.length !== 5)}
-                        title={roomIdInput.trim() ? "Join Room" : "Create Room"}
+                        title={roomIdInput.trim() ? "Rejoindre la salle" : "Créer une salle"}
                         className="px-4 py-3 rounded-xl bg-accent text-accent-foreground hover-elevate disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <Users size={24} />
+                        <Users size={22} />
                       </button>
                     </div>
-                    <p className="text-xs text-muted-foreground text-center">Leave Room ID empty to create a new room</p>
+                    <p className="text-xs text-muted-foreground text-center">Laissez le Room ID vide pour créer une salle</p>
                   </div>
                 </>
               ) : (
@@ -539,9 +581,9 @@ export default function Quiz() {
             </div>
           )}
           {hardcoreMode && (gameState === 'playing' || gameState === 'guessing' || gameState === 'result') ? (
-            <div className="flex items-center justify-center h-48 sm:h-64 w-full rounded-2xl glass-panel bg-black/95 border border-destructive/30">
+            <div className="flex items-center justify-center h-40 sm:h-64 w-full rounded-2xl glass-panel bg-black/95 border border-destructive/30">
               <div className="text-center space-y-3">
-                <div className="text-5xl">🎧</div>
+                <div className="text-4xl sm:text-5xl">🎧</div>
                 <p className="text-muted-foreground text-sm font-medium">No visuals — trust your ears</p>
                 {gameState === 'playing' && (
                   <span className="text-xs font-bold uppercase tracking-widest text-destructive animate-pulse">● Sorting…</span>
@@ -549,18 +591,34 @@ export default function Quiz() {
               </div>
             </div>
           ) : (
-            <AudioVisualizer array={array.length ? array : generateRandomArray(40)} activeIndices={activeIndices} />
+            <AudioVisualizer array={array.length ? array : generateRandomArray(40)} activeIndices={activeIndices} theme={equippedTheme} />
           )}
         </div>
 
+        {/* Progression indicator (solo mode) */}
+        {!room && (gameState === 'playing' || gameState === 'guessing') && nextUnlockRound !== null && (
+          <div className="flex items-center gap-2 px-3 py-1.5 glass-panel rounded-xl text-xs text-muted-foreground border border-white/5">
+            <Unlock size={12} className="text-primary shrink-0" />
+            <span>
+              {hardcoreMode ? 'HC' : 'Normal'}: {visibleAlgos.length} algos débloqués •{" "}
+              <span className="text-primary font-semibold">Round {nextUnlockRound}</span>{" "}
+              : +{(() => {
+                const interval = hardcoreMode ? 15 : 10;
+                const nextGroupIdx = Math.floor(nextUnlockRound / interval);
+                return ALGO_PROGRESSION[nextGroupIdx]?.length ?? 0;
+              })()} nouveaux
+            </span>
+          </div>
+        )}
+
         {/* Choices */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
           {visibleAlgos.map((algo: AlgorithmName) => {
             const isSelected = selectedAlgo === algo;
             const isCorrect = algo === currentAlgo;
             const canGuess = (gameState === 'playing' || gameState === 'guessing') && !hasGuessed;
             
-            let btnClass = "glass-panel py-3 px-4 text-sm font-medium rounded-xl transition-all duration-300 ";
+            let btnClass = "glass-panel py-2.5 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-medium rounded-xl transition-all duration-300 ";
 
             if (hasGuessed) {
               if (isSelected) {
@@ -596,6 +654,24 @@ export default function Quiz() {
 
         {/* Round Result Overlay */}
         <AnimatePresence>
+          {/* New algorithm unlock notification */}
+          {newUnlock && (gameState === 'playing' || gameState === 'guessing') && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4"
+            >
+              <div className="bg-primary/90 backdrop-blur-sm text-white rounded-2xl p-4 shadow-lg shadow-primary/30 border border-primary/50 text-center space-y-1">
+                <div className="flex items-center justify-center gap-2 font-bold">
+                  <Unlock size={16} />
+                  Nouveaux algorithmes débloqués !
+                </div>
+                <p className="text-sm opacity-90">{newUnlock.join(', ')}</p>
+              </div>
+            </motion.div>
+          )}
+
           {gameState === 'result' && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -603,13 +679,13 @@ export default function Quiz() {
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md"
             >
-              <div className="w-full max-w-md text-left space-y-4 bg-black/70 border border-white/10 rounded-3xl p-8">
+              <div className="w-full max-w-md text-left space-y-4 bg-black/70 border border-white/10 rounded-3xl p-6 sm:p-8">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm uppercase tracking-widest text-muted-foreground">
                       Round {room ? room.round : round}{room ? `/${room.maxRounds}` : ""}
                     </p>
-                    <p className="text-4xl font-black text-primary">
+                    <p className="text-3xl sm:text-4xl font-black text-primary">
                       {room
                         ? lastWinner || "No one"
                         : selectedAlgo && currentAlgo
@@ -625,7 +701,7 @@ export default function Quiz() {
                           : "No one guessed correctly"
                         : selectedAlgo && currentAlgo
                         ? selectedAlgo === currentAlgo
-                          ? "Great job!"
+                          ? `Great job! +${hardcoreMode ? 15 : 10} 🪙`
                           : "Better luck next time"
                         : ""
                       }
@@ -744,16 +820,16 @@ export default function Quiz() {
       {/* Leaderboard (during a round only) */}
       {room && (gameState === 'playing' || gameState === 'guessing') && sortedPlayers.length > 0 && (
         <div className="fixed top-4 left-4 right-4 sm:right-auto sm:left-8 z-40">
-          <div className="glass-panel p-4 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
+          <div className="glass-panel p-3 sm:p-4 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leaderboard</span>
               <span className="text-xs font-semibold text-muted-foreground">Round {room.round}/{room.maxRounds}</span>
             </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
               {sortedPlayers.slice(0, 6).map((p, idx) => (
                 <div key={p.id} className={`flex items-center justify-between text-sm ${p.id === myId ? 'font-bold text-primary' : 'text-muted-foreground'}`}>
                   <span className="truncate">{idx + 1}. {p.name}</span>
-                  <span className="font-semibold">{p.score}</span>
+                  <span className="font-semibold ml-2">{p.score}</span>
                 </div>
               ))}
             </div>
@@ -764,20 +840,40 @@ export default function Quiz() {
       {/* Game Over Modal (Solo) */}
       <AnimatePresence>
         {gameState === 'gameover' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/90 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="glass-panel p-8 rounded-3xl w-full max-w-md border-primary/20 text-center space-y-6">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/90 backdrop-blur-md overflow-y-auto">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="glass-panel p-6 sm:p-8 rounded-3xl w-full max-w-md border-primary/20 text-center space-y-4 my-4">
               <h2 className="text-3xl font-bold text-destructive">Game Over</h2>
               <div className="space-y-1">
-                <p className="text-muted-foreground">Final Score</p>
+                <p className="text-muted-foreground">Score final</p>
                 <p className="text-5xl font-black text-primary">{score}</p>
               </div>
-              <form onSubmit={submitScore} className="space-y-4 pt-4">
+
+              {/* Coins earned summary */}
+              {user && score > 0 && (
+                <div className="flex items-center justify-center gap-2 py-2 px-4 bg-yellow-500/10 text-yellow-400 rounded-xl border border-yellow-500/20 text-sm font-semibold">
+                  <span>🪙</span>
+                  <span>+{score * (hardcoreMode ? 15 : 10)} coins gagnés !</span>
+                  {hardcoreMode && <span className="text-xs opacity-70">(×1.5 hardcore)</span>}
+                </div>
+              )}
+
+              {/* Progression info */}
+              {!room && (
+                <div className="text-xs text-muted-foreground bg-white/5 rounded-xl px-3 py-2 text-left">
+                  <p className="font-semibold text-foreground mb-1 flex items-center gap-1">
+                    <Unlock size={12} /> Algorithmes débloqués ({visibleAlgos.length}/{ALGORITHMS.length})
+                  </p>
+                  <p>Mode {hardcoreMode ? 'Hardcore' : 'Normal'} — nouveau groupe toutes les {hardcoreMode ? 15 : 10} manches</p>
+                </div>
+              )}
+
+              <form onSubmit={submitScore} className="space-y-3 pt-2">
                 <input 
                   type="text" value={playerName} onChange={e => setPlayerName(e.target.value)} 
-                  placeholder="Enter name for leaderboard" className="w-full px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none" required maxLength={20}
+                  placeholder="Votre nom pour le classement" className="w-full px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm" required maxLength={20}
                 />
-                <button type="submit" disabled={createScore.isPending || !playerName.trim()} className="w-full px-6 py-4 rounded-xl font-bold bg-primary text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
-                  {createScore.isPending ? <Loader2 className="animate-spin" size={20} /> : <>Submit Score <ArrowRight size={20} /></>}
+                <button type="submit" disabled={createScore.isPending || !playerName.trim()} className="w-full px-6 py-3 rounded-xl font-bold bg-primary text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {createScore.isPending ? <Loader2 className="animate-spin" size={20} /> : <>Soumettre le score <ArrowRight size={20} /></>}
                 </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -788,14 +884,14 @@ export default function Quiz() {
                     }}
                     className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
                   >
-                    Play Again
+                    Rejouer
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/')}
                     className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
                   >
-                    Back to menu
+                    Menu principal
                   </button>
                 </div>
               </form>

@@ -74,3 +74,69 @@ export function useLogout() {
     },
   });
 }
+
+export function useUpdateStats() {
+  const queryClient = useQueryClient();
+  return useMutation<PublicUser, Error, { scoreToAdd: number; coinsToAdd: number }>({
+    mutationFn: async (data) => {
+      const res = await fetch(api.user.updateStats.path, {
+        method: api.user.updateStats.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Erreur lors de la mise à jour.");
+      }
+      return res.json() as Promise<PublicUser>;
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData([api.auth.me.path], user);
+    },
+  });
+}
+
+export function useBuyShopItem() {
+  const queryClient = useQueryClient();
+  return useMutation<PublicUser, Error, { itemId: string }>({
+    mutationFn: async ({ itemId }) => {
+      const res = await fetch(api.shop.buy.path, {
+        method: api.shop.buy.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Erreur lors de l'achat.");
+      }
+      return res.json() as Promise<PublicUser>;
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData([api.auth.me.path], user);
+    },
+  });
+}
+
+export function useEquipTheme() {
+  const queryClient = useQueryClient();
+  return useMutation<PublicUser, Error, { itemId: string }>({
+    mutationFn: async ({ itemId }) => {
+      const res = await fetch(api.shop.equip.path, {
+        method: api.shop.equip.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Erreur lors de l'équipement.");
+      }
+      return res.json() as Promise<PublicUser>;
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData([api.auth.me.path], user);
+    },
+  });
+}

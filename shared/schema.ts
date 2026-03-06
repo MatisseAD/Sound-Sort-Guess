@@ -35,6 +35,8 @@ export const utilisateurs = pgTable("utilisateurs", {
   motDePasse: varchar("mot_de_passe", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   lastLogin: timestamp("last_login"),
+  purchasedItems: text("purchased_items").notNull().default("[]"),
+  equippedTheme: varchar("equipped_theme", { length: 50 }).default("default"),
 });
 
 export const insertScoreSchema = createInsertSchema(scores).omit({ id: true, createdAt: true });
@@ -45,6 +47,8 @@ export const insertUtilisateurSchema = createInsertSchema(utilisateurs).omit({
   lastLogin: true,
   pointsBoutiques: true,
   score: true,
+  purchasedItems: true,
+  equippedTheme: true,
 });
 
 export const registerSchema = insertUtilisateurSchema.extend({

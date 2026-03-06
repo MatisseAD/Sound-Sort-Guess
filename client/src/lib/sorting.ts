@@ -37,6 +37,53 @@ export const ALGORITHMS = [
 
 export type AlgorithmName = typeof ALGORITHMS[number];
 
+/**
+ * Algorithm progression groups – ordered from easiest/most recognisable to most obscure.
+ * Group 0 is available from the start. Each subsequent group unlocks every `interval` rounds.
+ */
+export const ALGO_PROGRESSION: AlgorithmName[][] = [
+  // Group 0 — always available (5 algorithms)
+  ['Bubble Sort', 'Insertion Sort', 'Selection Sort', 'Quick Sort', 'Merge Sort'],
+  // Group 1 — unlocks at round 10 (normal) / 15 (hardcore)
+  ['Heap Sort', 'Shell Sort', 'Cocktail Sort'],
+  // Group 2 — unlocks at round 20 (normal) / 30 (hardcore)
+  ['Counting Sort', 'Radix Sort', 'Tim Sort'],
+  // Group 3 — unlocks at round 30 (normal) / 45 (hardcore)
+  ['Gnome Sort', 'Comb Sort', 'Bitonic Sort'],
+  // Group 4 — unlocks at round 40 (normal) / 60 (hardcore)
+  ['Odd-Even Sort', 'Pancake Sort', 'Cycle Sort', 'Binary Insertion Sort'],
+  // Group 5 — unlocks at round 50 (normal) / 75 (hardcore)
+  ['Stooge Sort', 'Slow Sort', 'Gravity Sort', 'Circle Sort', 'Bucket Sort', 'Exchange Sort'],
+  // Group 6 — unlocks at round 60 (normal) / 90 (hardcore)
+  ['Double Selection Sort', 'Bogo Sort', 'Bozo Sort', 'Stalin Sort', 'Sleep Sort'],
+];
+
+/**
+ * Returns the list of algorithms available given the current round and mode.
+ * Normal mode: unlock a new group every 10 rounds.
+ * Hardcore mode: unlock a new group every 15 rounds.
+ */
+export function getProgressiveAlgos(round: number, hardcore: boolean): AlgorithmName[] {
+  const interval = hardcore ? 15 : 10;
+  const maxGroup = Math.min(Math.floor(round / interval), ALGO_PROGRESSION.length - 1);
+  const algos: AlgorithmName[] = [];
+  for (let i = 0; i <= maxGroup; i++) {
+    algos.push(...ALGO_PROGRESSION[i]);
+  }
+  return algos;
+}
+
+/**
+ * Returns the round at which the next algorithm group will unlock.
+ * Returns null if all groups are already unlocked.
+ */
+export function getNextUnlockRound(round: number, hardcore: boolean): number | null {
+  const interval = hardcore ? 15 : 10;
+  const currentGroup = Math.floor(round / interval);
+  if (currentGroup >= ALGO_PROGRESSION.length - 1) return null;
+  return (currentGroup + 1) * interval;
+}
+
 export function* bubbleSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
