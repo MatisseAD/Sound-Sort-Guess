@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertScoreSchema, scores } from './schema';
+import { insertScoreSchema, scores, registerSchema, loginSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -10,6 +10,18 @@ export const errorSchemas = {
     message: z.string(),
   }),
 };
+
+export const publicUserSchema = z.object({
+  id: z.number(),
+  pseudo: z.string(),
+  mail: z.string(),
+  score: z.number().nullable(),
+  pointsBoutiques: z.number().nullable(),
+  createdAt: z.string(),
+  lastLogin: z.string().nullable(),
+});
+
+export type PublicUser = z.infer<typeof publicUserSchema>;
 
 export const api = {
   scores: {
@@ -27,6 +39,43 @@ export const api = {
       responses: {
         201: z.custom<typeof scores.$inferSelect>(),
         400: errorSchemas.validation,
+      },
+    },
+  },
+  auth: {
+    register: {
+      method: 'POST' as const,
+      path: '/api/auth/register' as const,
+      input: registerSchema,
+      responses: {
+        201: publicUserSchema,
+        400: errorSchemas.validation,
+        409: errorSchemas.validation,
+      },
+    },
+    login: {
+      method: 'POST' as const,
+      path: '/api/auth/login' as const,
+      input: loginSchema,
+      responses: {
+        200: publicUserSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.validation,
+      },
+    },
+    logout: {
+      method: 'POST' as const,
+      path: '/api/auth/logout' as const,
+      responses: {
+        200: z.object({ message: z.string() }),
+      },
+    },
+    me: {
+      method: 'GET' as const,
+      path: '/api/auth/me' as const,
+      responses: {
+        200: publicUserSchema,
+        401: errorSchemas.validation,
       },
     },
   },

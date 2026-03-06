@@ -2,10 +2,21 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { api, ws as wsSchema } from "@shared/routes";
+import { registerSchema, loginSchema } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import { ALGORITHMS, generateRandomArray } from "../client/src/lib/sorting";
 import { nanoid } from "nanoid";
+import { hashPassword, verifyPassword } from "./auth";
+import rateLimit from "express-rate-limit";
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Trop de tentatives. Réessayez dans 15 minutes." },
+});
 
 const ROUND_TIMEOUT_MS = 90_000;
 
@@ -209,6 +220,117 @@ export async function registerRoutes(
       }
       throw err;
     }
+  });
+
+  // Auth: Register
+  app.post(api.auth.register.path, authLimiter, async (req, res) => {
+    try {
+      const input = registerSchema.parse(req.body);
+
+      const existingMail = await storage.getUtilisateurByMail(input.mail);
+      if (existingMail) {
+        return res.status(409).json({ message: "Cette adresse mail est déjà utilisée." });
+      }
+
+      const existingPseudo = await storage.getUtilisateurByPseudo(input.pseudo);
+      if (existingPseudo) {
+        return res.status(409).json({ message: "Ce pseudo est déjà utilisé." });
+      }
+
+      const hashedPassword = await hashPassword(input.motDePasse);
+      const user = await storage.createUtilisateur({
+        pseudo: input.pseudo,
+        mail: input.mail,
+        motDePasse: hashedPassword,
+      });
+
+      req.session.userId = user.id;
+
+      return res.status(201).json({
+        id: user.id,
+        pseudo: user.pseudo,
+        mail: user.mail,
+        score: user.score,
+        pointsBoutiques: user.pointsBoutiques,
+        createdAt: user.createdAt.toISOString(),
+        lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      throw err;
+    }
+  });
+
+  // Auth: Login
+  app.post(api.auth.login.path, authLimiter, async (req, res) => {
+    try {
+      const input = loginSchema.parse(req.body);
+
+      const user = await storage.getUtilisateurByMail(input.mail);
+      if (!user) {
+        return res.status(401).json({ message: "Identifiants incorrects." });
+      }
+
+      const valid = await verifyPassword(input.motDePasse, user.motDePasse);
+      if (!valid) {
+        return res.status(401).json({ message: "Identifiants incorrects." });
+      }
+
+      await storage.updateLastLogin(user.id);
+      req.session.userId = user.id;
+
+      const updatedUser = await storage.getUtilisateurById(user.id);
+
+      return res.status(200).json({
+        id: user.id,
+        pseudo: user.pseudo,
+        mail: user.mail,
+        score: user.score,
+        pointsBoutiques: user.pointsBoutiques,
+        createdAt: user.createdAt.toISOString(),
+        lastLogin: updatedUser?.lastLogin ? updatedUser.lastLogin.toISOString() : null,
+      });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      throw err;
+    }
+  });
+
+  // Auth: Logout
+  app.post(api.auth.logout.path, (req, res) => {
+    req.session.destroy(() => {
+      res.status(200).json({ message: "Déconnecté avec succès." });
+    });
+  });
+
+  // Auth: Me
+  app.get(api.auth.me.path, async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Non authentifié." });
+    }
+    const user = await storage.getUtilisateurById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ message: "Utilisateur introuvable." });
+    }
+    return res.status(200).json({
+      id: user.id,
+      pseudo: user.pseudo,
+      mail: user.mail,
+      score: user.score,
+      pointsBoutiques: user.pointsBoutiques,
+      createdAt: user.createdAt.toISOString(),
+      lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+    });
   });
 
   // Seed database if empty
