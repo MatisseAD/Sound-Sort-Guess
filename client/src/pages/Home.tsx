@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { Play, Trophy, Headphones } from "lucide-react";
+import { Play, Trophy, Headphones, Eye } from "lucide-react";
 
 export default function Home() {
   return (
@@ -30,6 +30,14 @@ export default function Home() {
           >
             <Play fill="currentColor" size={20} />
             Start Listening
+          </Link>
+          
+          <Link 
+            href="/zen" 
+            className="w-full sm:w-auto px-8 py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 glass-panel hover:bg-white/5 hover:-translate-y-1 transition-all duration-300"
+          >
+            <Eye size={20} className="text-accent" />
+            Zen Mode
           </Link>
           
           <Link 
