@@ -256,7 +256,6 @@ export default function Zen() {
                     <AudioVisualizer
                       array={array}
                       activeIndices={activeIndices}
-                      algorithm={selectedAlgo}
                     />
                     <div className="text-center text-muted-foreground">
                       {isPlaying ? 'Playing...' : (isPausedRef.current ? 'Paused' : 'Finished')}

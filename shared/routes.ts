@@ -86,17 +86,31 @@ export const ws = {
   send: {
     joinRoom: z.object({ playerName: z.string(), roomId: z.string().optional() }),
     ready: z.object({}),
+    startRound: z.object({}),
+    setRoomOptions: z.object({
+      maxRounds: z.number().int().min(1).max(20).optional(),
+      allowedAlgos: z.array(z.string()).min(1).optional(),
+    }),
+    kickPlayer: z.object({ playerId: z.string() }),
     guess: z.object({ algo: z.string() }),
+    resetRoom: z.object({}),
   },
   // Server to Client
   receive: {
     roomUpdate: z.object({ 
-      room: z.any(),
+      room: z.object({
+        id: z.string(),
+        status: z.string(),
+        round: z.number(),
+        maxRounds: z.number(),
+        ownerId: z.string(),
+        allowedAlgos: z.array(z.string()),
+      }),
       players: z.array(z.any()),
       me: z.any()
     }),
-    gameStart: z.object({ algo: z.string(), array: z.array(z.number()) }),
-    roundResult: z.object({ winner: z.string().optional(), correctAlgo: z.string() }),
+    gameStart: z.object({ algo: z.string(), array: z.array(z.number()), round: z.number().optional(), maxRounds: z.number().optional() }),
+    roundResult: z.object({ winner: z.string().optional(), correctAlgo: z.string(), round: z.number().optional(), maxRounds: z.number().optional(), players: z.array(z.any()) }),
   }
 };
 

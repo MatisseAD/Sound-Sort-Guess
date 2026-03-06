@@ -6,7 +6,7 @@ import { registerSchema, loginSchema } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import { ALGORITHMS, generateRandomArray } from "../client/src/lib/sorting";
-import { nanoid } from "nanoid";
+import { nanoid, customAlphabet } from "nanoid";
 import { hashPassword, verifyPassword } from "./auth";
 import rateLimit from "express-rate-limit";
 
@@ -19,6 +19,13 @@ const authLimiter = rateLimit({
 });
 
 const ROUND_TIMEOUT_MS = 90_000;
+
+// 6 characters, uppercase letters + digits
+const ROOM_CODE_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const ROOM_CODE_LENGTH = 5;
+const makeRoomId = customAlphabet(ROOM_CODE_ALPHA, ROOM_CODE_LENGTH);
+const isValidRoomId = (id: string) => /^[A-Z0-9]{5}$/.test(id);
+const MAX_ROUNDS = 10;
 
 interface Client extends WebSocket {
   id?: string;
@@ -34,11 +41,15 @@ export async function registerRoutes(
 
   const rooms = new Map<string, {
     id: string;
-    status: "waiting" | "playing";
+    status: "waiting" | "playing" | "ended";
+    round: number;
+    maxRounds: number;
+    ownerId: string;
+    allowedAlgos: string[];
     currentAlgo?: string;
     array?: number[];
     roundTimeout?: ReturnType<typeof setTimeout>;
-    players: Map<string, { id: string, name: string, score: number, ready: boolean, socket: Client }>;
+    players: Map<string, { id: string, name: string, score: number, ready: boolean, hasGuessed: boolean, socket: Client }>;
   }>();
 
   wss.on("connection", (ws: Client) => {
@@ -48,14 +59,23 @@ export async function registerRoutes(
         
         if (message.type === "joinRoom") {
           const { playerName, roomId: targetRoomId } = wsSchema.send.joinRoom.parse(message.payload);
-          const roomId = targetRoomId || nanoid(10);
-          
+          const normalizedRoomId = targetRoomId ? targetRoomId.toUpperCase() : undefined;
+          const roomId = normalizedRoomId && isValidRoomId(normalizedRoomId) ? normalizedRoomId : makeRoomId();
+          const playerId = nanoid(5);
+
           if (!rooms.has(roomId)) {
-            rooms.set(roomId, { id: roomId, status: "waiting", players: new Map() });
+            rooms.set(roomId, {
+              id: roomId,
+              status: "waiting",
+              round: 0,
+              maxRounds: MAX_ROUNDS,
+              ownerId: playerId,
+              allowedAlgos: [...ALGORITHMS],
+              players: new Map(),
+            });
           }
           
           const room = rooms.get(roomId)!;
-          const playerId = nanoid(5);
           
           ws.id = playerId;
           ws.roomId = roomId;
@@ -66,6 +86,7 @@ export async function registerRoutes(
             name: playerName,
             score: 0,
             ready: false,
+            hasGuessed: false,
             socket: ws
           });
           
@@ -78,14 +99,58 @@ export async function registerRoutes(
             const player = room.players.get(ws.id);
             if (player) {
               player.ready = !player.ready;
-              
-              // Check if all ready
-              const allReady = Array.from(room.players.values()).every(p => p.ready);
-              if (allReady && room.players.size >= 2 && room.status === "waiting") {
-                startRoomGame(ws.roomId);
-              } else {
-                broadcastRoom(ws.roomId);
+            }
+            // Just broadcast updated ready state; the host can start once everyone is ready.
+            broadcastRoom(ws.roomId);
+          }
+        }
+
+        if (message.type === "startRound" && ws.roomId && ws.id) {
+          const room = rooms.get(ws.roomId);
+          if (room && room.ownerId === ws.id && room.status === "waiting" && room.round < room.maxRounds) {
+            // For the first round, require all players to be ready.
+            // For subsequent rounds, the host can start immediately.
+            const allReady = Array.from(room.players.values()).every(p => p.ready);
+            const soloPlayer = room.players.size === 1;
+            const canStart = room.round === 0 ? (soloPlayer || allReady) : true;
+            if (canStart) {
+              startRoomGame(ws.roomId);
+            }
+          }
+        }
+
+        if (message.type === "setRoomOptions" && ws.roomId && ws.id) {
+          const room = rooms.get(ws.roomId);
+          if (room && room.ownerId === ws.id && room.status === "waiting") {
+            const { maxRounds, allowedAlgos } = wsSchema.send.setRoomOptions.parse(message.payload);
+            if (typeof maxRounds === "number") {
+              room.maxRounds = Math.max(1, Math.min(MAX_ROUNDS, maxRounds));
+            }
+
+            if (Array.isArray(allowedAlgos) && allowedAlgos.length) {
+              const validAlgos = new Set<string>(ALGORITHMS);
+              const filtered = allowedAlgos.filter(a => validAlgos.has(a));
+              if (filtered.length) {
+                room.allowedAlgos = filtered;
               }
+            }
+
+            broadcastRoom(ws.roomId);
+          }
+        }
+
+        if (message.type === "kickPlayer" && ws.roomId && ws.id) {
+          const room = rooms.get(ws.roomId);
+          if (room && room.ownerId === ws.id) {
+            const { playerId } = wsSchema.send.kickPlayer.parse(message.payload);
+            const target = room.players.get(playerId);
+            if (target) {
+              room.players.delete(playerId);
+              if (target.socket.readyState === WebSocket.OPEN) {
+                target.socket.send(JSON.stringify({ type: "kicked", payload: { reason: "You were kicked from the room." } }));
+                target.socket.close();
+              }
+              broadcastRoom(ws.roomId);
             }
           }
         }
@@ -95,9 +160,40 @@ export async function registerRoutes(
           if (room && room.status === "playing") {
             const { algo } = wsSchema.send.guess.parse(message.payload);
             const player = room.players.get(ws.id);
-            if (player && algo === room.currentAlgo) {
+            if (!player || player.hasGuessed) return;
+
+            player.hasGuessed = true;
+
+            // Correct guess ends the round immediately.
+            if (algo === room.currentAlgo) {
               endRound(ws.roomId, player.name);
+              return;
             }
+
+            // End round if everyone has guessed.
+            const allGuessed = Array.from(room.players.values()).every(p => p.hasGuessed);
+            if (allGuessed) {
+              endRound(ws.roomId, undefined);
+              return;
+            }
+
+            broadcastRoom(ws.roomId);
+          }
+        }
+
+        if (message.type === "resetRoom" && ws.roomId) {
+          const room = rooms.get(ws.roomId);
+          if (room) {
+            room.status = "waiting";
+            room.round = 0;
+            room.currentAlgo = undefined;
+            room.array = undefined;
+            room.players.forEach(p => {
+              p.score = 0;
+              p.ready = false;
+              p.hasGuessed = false;
+            });
+            broadcastRoom(ws.roomId);
           }
         }
       } catch (e) {
@@ -109,7 +205,15 @@ export async function registerRoutes(
       if (ws.roomId && ws.id) {
         const room = rooms.get(ws.roomId);
         if (room) {
+          const wasOwner = room.ownerId === ws.id;
           room.players.delete(ws.id);
+
+          // If the owner leaves, transfer ownership to another player.
+          if (wasOwner && room.players.size > 0) {
+            const nextOwner = Array.from(room.players.values())[0];
+            room.ownerId = nextOwner.id;
+          }
+
           if (room.players.size === 0) {
             if (room.roundTimeout) clearTimeout(room.roundTimeout);
             rooms.delete(ws.roomId);
@@ -140,7 +244,8 @@ export async function registerRoutes(
         id: p.id,
         name: p.name,
         score: p.score,
-        ready: p.ready
+        ready: p.ready,
+        hasGuessed: p.hasGuessed
       }));
       
       room.players.forEach(p => {
@@ -148,7 +253,7 @@ export async function registerRoutes(
           p.socket.send(JSON.stringify({
             type: "roomUpdate",
             payload: {
-              room: { id: room.id, status: room.status },
+              room: { id: room.id, status: room.status, round: room.round, maxRounds: room.maxRounds, ownerId: room.ownerId, allowedAlgos: room.allowedAlgos },
               players: playersList,
               me: { id: p.id }
             }
@@ -171,35 +276,72 @@ export async function registerRoutes(
     // Award point to winner
     if (winnerName) {
       room.players.forEach(p => {
-        if (p.name === winnerName) p.score += 10;
+        if (p.name === winnerName) p.score += 1;
       });
     }
 
-    room.status = "waiting";
     room.players.forEach(p => p.ready = false);
+
+    const playersList = Array.from(room.players.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      score: p.score,
+      ready: p.ready,
+      hasGuessed: p.hasGuessed,
+    }));
 
     broadcast(roomId, "roundResult", {
       winner: winnerName ?? null,
-      correctAlgo: room.currentAlgo
+      correctAlgo: room.currentAlgo,
+      round: room.round,
+      maxRounds: room.maxRounds,
+      players: playersList,
     });
 
-    setTimeout(() => broadcastRoom(roomId), 3000);
+    // Update scores to clients
+    broadcastRoom(roomId);
+
+    // If we've reached the max number of rounds, end the game
+    if (room.round >= room.maxRounds) {
+      room.status = "ended";
+      const finalPlayers = Array.from(room.players.values()).map(p => ({ id: p.id, name: p.name, score: p.score }));
+      broadcast(roomId, "gameOver", { players: finalPlayers });
+      return;
+    }
+
+    // Mark room as waiting for next round (so ready button can start it)
+    room.status = "waiting";
+    room.roundTimeout = undefined;
   }
 
   function startRoomGame(roomId: string) {
     const room = rooms.get(roomId);
-    if (room) {
-      const algo = ALGORITHMS[Math.floor(Math.random() * ALGORITHMS.length)];
-      const array = generateRandomArray(40);
-      room.status = "playing";
-      room.currentAlgo = algo;
-      room.array = array;
+    if (!room || room.status === "ended" || room.round >= room.maxRounds) return;
 
-      // Timeout: end round automatically after 90 seconds if nobody guesses correctly
-      room.roundTimeout = setTimeout(() => endRound(roomId, undefined), ROUND_TIMEOUT_MS);
-
-      broadcast(roomId, "gameStart", { algo, array });
+    // Clear any pending timeouts so we can start cleanly.
+    if (room.roundTimeout) {
+      clearTimeout(room.roundTimeout);
+      room.roundTimeout = undefined;
     }
+
+    room.round += 1;
+    const availableAlgos = room.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : ALGORITHMS;
+    const algo = availableAlgos[Math.floor(Math.random() * availableAlgos.length)];
+    const array = generateRandomArray(40);
+    room.status = "playing";
+    room.currentAlgo = algo;
+    room.array = array;
+
+    // Reset per-player round state
+    room.players.forEach(p => {
+      p.ready = false;
+      p.hasGuessed = false;
+    });
+
+    // Timeout: end round automatically after 90 seconds if nobody guesses correctly
+    room.roundTimeout = setTimeout(() => endRound(roomId, undefined), ROUND_TIMEOUT_MS);
+
+    broadcast(roomId, "gameStart", { algo, array, round: room.round, maxRounds: room.maxRounds });
   }
   app.get(api.scores.list.path, async (req, res) => {
     const scoresList = await storage.getScores();

@@ -6,7 +6,7 @@ import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName }
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
-import { Volume2, VolumeX, ArrowLeft, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff } from "lucide-react";
+import { Volume2, VolumeX, ArrowLeft, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff, Crown, X } from "lucide-react";
 
 type Message = {
   type: string;
@@ -16,20 +16,27 @@ type Message = {
 export default function Quiz() {
   const [, navigate] = useLocation();
   const [score, setScore] = useState(0);
+  const [round, setRound] = useState(0);
   const [currentAlgo, setCurrentAlgo] = useState<AlgorithmName | null>(null);
   const [array, setArray] = useState<number[]>([]);
   const [activeIndices, setActiveIndices] = useState<number[]>([]);
   
   const [gameState, setGameState] = useState<'idle' | 'playing' | 'guessing' | 'result' | 'gameover' | 'multiplayer'>('idle');
   const [selectedAlgo, setSelectedAlgo] = useState<AlgorithmName | null>(null);
+  const [hasGuessed, setHasGuessed] = useState(false);
+  const [nextRoundRequested, setNextRoundRequested] = useState(false);
   
   const [playerName, setPlayerName] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
   const [hardcoreMode, setHardcoreMode] = useState(false);
   const createScore = useCreateScore();
+
+  const normalizeRoomId = (value: string) =>
+    value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
   
   const isComponentMounted = useRef(true);
   const playbackRef = useRef<boolean>(false);
+  const nextRoundTimeout = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   // Multiplayer state
@@ -37,7 +44,15 @@ export default function Quiz() {
   const [players, setPlayers] = useState<any[]>([]);
   const [myId, setMyId] = useState<string>("");
   const [lastWinner, setLastWinner] = useState<string | null>(null);
+  const [globalWinner, setGlobalWinner] = useState<string | null>(null);
+  const [isFinalRound, setIsFinalRound] = useState(false);
+  const [showFinalRanking, setShowFinalRanking] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Host settings
+  const [pendingMaxRounds, setPendingMaxRounds] = useState(5);
+  const [pendingAlgos, setPendingAlgos] = useState<AlgorithmName[]>([...ALGORITHMS]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     isComponentMounted.current = true;
@@ -45,8 +60,12 @@ export default function Quiz() {
       isComponentMounted.current = false;
       playbackRef.current = false;
       if (socketRef.current) socketRef.current.close();
+      if (nextRoundTimeout.current) {
+        window.clearTimeout(nextRoundTimeout.current);
+      }
     };
   }, []);
+
 
   const connectMultiplayer = (name: string, roomId?: string) => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -67,18 +86,61 @@ export default function Quiz() {
         setRoom(msg.payload.room);
         setPlayers(msg.payload.players);
         setMyId(msg.payload.me.id);
-        setGameState('multiplayer');
+
+        setPendingMaxRounds(msg.payload.room.maxRounds ?? 5);
+        setPendingAlgos(msg.payload.room.allowedAlgos ?? ALGORITHMS);
+
+        const meState = msg.payload.players.find((p: any) => p.id === msg.payload.me.id);
+        setHasGuessed(meState?.hasGuessed ?? false);
+
+        // Only go into lobby mode if we haven't started playing yet
+        setGameState(prev => {
+          if (prev === 'idle') return 'multiplayer';
+          if (msg.payload.room.status === 'waiting' && prev !== 'playing' && prev !== 'result') return 'multiplayer';
+          return prev;
+        });
+      }
+
+      if (msg.type === "kicked") {
+        setRoom(null);
+        setPlayers([]);
+        setMyId("");
+        setGameState('idle');
+        alert(msg.payload?.reason || "You were removed from the room.");
       }
 
       if (msg.type === "gameStart") {
         setLastWinner(null);
+        setHasGuessed(false);
+        setSelectedAlgo(null);
+        setNextRoundRequested(false);
+        setRoom((prev: any) => prev ? { ...prev, round: msg.payload.round, maxRounds: msg.payload.maxRounds } : prev);
         handleStartRound(msg.payload.algo, msg.payload.array);
       }
 
       if (msg.type === "roundResult") {
         playbackRef.current = false;
+        setIsFinalRound(false);
+        setShowFinalRanking(false);
         setLastWinner(msg.payload.winner || "No one");
         setCurrentAlgo(msg.payload.correctAlgo as AlgorithmName);
+        setRoom((prev: any) => prev ? { ...prev, round: msg.payload.round, maxRounds: msg.payload.maxRounds } : prev);
+        setPlayers(msg.payload.players ?? []);
+        setGameState('result');
+      }
+
+      if (msg.type === "gameOver") {
+        const finalPlayers = msg.payload.players as Array<{ id: string; name: string; score: number }>;
+        setPlayers(finalPlayers);
+
+        const me = finalPlayers.find(p => p.id === myId);
+        if (me) setScore(me.score);
+
+        const winner = finalPlayers.reduce((best, p) => (p.score > best.score ? p : best), finalPlayers[0]);
+        setGlobalWinner(winner?.name || "No one");
+
+        setIsFinalRound(true);
+        setShowFinalRanking(false);
         setGameState('result');
       }
     };
@@ -121,8 +183,18 @@ export default function Quiz() {
     }
   };
 
-  const startRound = (hardcore = false) => {
+  const startRound = (hardcore = false, options?: { reset?: boolean }) => {
     setHardcoreMode(hardcore);
+    setSelectedAlgo(null);
+    setHasGuessed(false);
+
+    if (options?.reset) {
+      setScore(0);
+      setRound(1);
+    } else {
+      setRound((r) => r + 1);
+    }
+
     handleStartRound(
       ALGORITHMS[Math.floor(Math.random() * ALGORITHMS.length)],
       generateRandomArray(40)
@@ -133,7 +205,8 @@ export default function Quiz() {
     if (gameState !== 'playing' && gameState !== 'guessing') return;
     
     setSelectedAlgo(algo);
-    
+    setHasGuessed(true);
+
     if (socketRef.current && room) {
       socketRef.current.send(JSON.stringify({
         type: "guess",
@@ -142,25 +215,58 @@ export default function Quiz() {
       return;
     }
 
-    setGameState('result');
     playbackRef.current = false;
-    
+
     if (algo === currentAlgo) {
       confetti({
         particleCount: 100, spread: 70, origin: { y: 0.6 },
         colors: ['#8B5CF6', '#D946EF', '#ffffff']
       });
       setScore(s => s + 1);
-      setTimeout(() => isComponentMounted.current && startRound(hardcoreMode), 2000);
-    } else {
-      setTimeout(() => isComponentMounted.current && setGameState('gameover'), 2000);
+
+      if (nextRoundTimeout.current) {
+        window.clearTimeout(nextRoundTimeout.current);
+      }
+      nextRoundTimeout.current = window.setTimeout(() => {
+        if (!isComponentMounted.current) return;
+        startRound(hardcoreMode);
+      }, 700);
+
+      return;
     }
+
+    setGameState('gameover');
   };
 
   const toggleReady = () => {
     if (socketRef.current) {
+      if (myReady) {
+        setNextRoundRequested(false);
+      }
       socketRef.current.send(JSON.stringify({ type: "ready", payload: {} }));
     }
+  };
+
+  const sendStartRound = () => {
+    if (socketRef.current) {
+      socketRef.current.send(JSON.stringify({ type: "startRound", payload: {} }));
+    }
+  };
+
+  const sendRoomOptions = () => {
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({
+      type: "setRoomOptions",
+      payload: {
+        maxRounds: pendingMaxRounds,
+        allowedAlgos: pendingAlgos,
+      },
+    }));
+  };
+
+  const kickPlayer = (playerId: string) => {
+    if (!socketRef.current) return;
+    socketRef.current.send(JSON.stringify({ type: "kickPlayer", payload: { playerId } }));
   };
 
   const copyRoomId = () => {
@@ -179,7 +285,13 @@ export default function Quiz() {
     navigate('/leaderboard');
   };
 
-  const me = players.find(p => p.id === myId);
+  const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  const me = sortedPlayers.find(p => p.id === myId);
+  const isHost = room?.ownerId === myId;
+  const allReady = players.length > 0 && players.every(p => p.ready);
+  const myReady = me?.ready ?? false;
+  const readyCount = players.filter(p => p.ready).length;
+  const visibleAlgos = (room?.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : ALGORITHMS) as AlgorithmName[];
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
@@ -196,7 +308,7 @@ export default function Quiz() {
               <span className="text-sm">Back</span>
             </Link>
             <div className="text-xl font-bold flex items-center gap-2">
-              {room ? `Room: ${room.id}` : `Score: ${score}`}
+              {room ? `Room: ${room.id}${room.round ? ` · Round ${room.round}/${room.maxRounds}` : ""}` : `Score: ${score}${round ? ` · Round ${round}` : ""}`}
               {hardcoreMode && (
                 <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30">
                   Hardcore
@@ -233,10 +345,10 @@ export default function Quiz() {
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-2xl p-6 space-y-4">
               {gameState === 'idle' ? (
                 <>
-                  <button onClick={() => startRound(false)} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
+                  <button onClick={() => startRound(false, { reset: true })} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
                     <Play size={24} /> Solo Mode
                   </button>
-                  <button onClick={() => startRound(true)} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
+                  <button onClick={() => startRound(true, { reset: true })} className="w-full max-w-xs px-8 py-4 rounded-xl font-bold text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
                     <EyeOff size={24} /> Hardcore Mode
                   </button>
                   <div className="w-full max-w-xs space-y-2">
@@ -246,12 +358,12 @@ export default function Quiz() {
                     />
                     <div className="flex gap-2">
                       <input
-                        type="text" value={roomIdInput} onChange={e => setRoomIdInput(e.target.value)}
-                        placeholder="Room ID (optional)" className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
+                        type="text" value={roomIdInput} onChange={e => setRoomIdInput(normalizeRoomId(e.target.value))}
+                        placeholder="Room ID (optional)" maxLength={5} className="flex-1 px-4 py-3 rounded-xl bg-black/50 border-2 border-white/10 focus:border-primary focus:outline-none text-sm"
                       />
                       <button
                         onClick={() => connectMultiplayer(playerName, roomIdInput.trim() || undefined)}
-                        disabled={!playerName.trim()}
+                        disabled={!playerName.trim() || (roomIdInput !== "" && roomIdInput.length !== 5)}
                         title={roomIdInput.trim() ? "Join Room" : "Create Room"}
                         className="px-4 py-3 rounded-xl bg-accent text-accent-foreground hover-elevate disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -264,29 +376,164 @@ export default function Quiz() {
               ) : (
                 <div className="text-center space-y-4">
                   <h3 className="text-2xl font-bold">Waiting for players...</h3>
-                  <div className="flex items-center justify-center gap-2 text-sm">
-                    <span className="text-muted-foreground">Room ID:</span>
-                    <span className="font-mono font-bold text-primary">{room?.id}</span>
-                    <button onClick={copyRoomId} title="Copy Room ID" className="p-1 rounded hover:bg-white/10 transition-colors">
-                      {copied ? <Check size={16} className="text-success" /> : <Copy size={16} className="text-muted-foreground" />}
-                    </button>
+                  <div className="flex flex-col items-center gap-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Room ID:</span>
+                      <span className="font-mono font-bold text-primary">{room?.id}</span>
+                      <button onClick={copyRoomId} title="Copy Room ID" className="p-1 rounded hover:bg-white/10 transition-colors">
+                        {copied ? <Check size={16} className="text-success" /> : <Copy size={16} className="text-muted-foreground" />}
+                      </button>
+                    </div>
+                    <div className="text-muted-foreground text-xs">Rounds: {room?.maxRounds}</div>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     {players.map(p => (
                       <div key={p.id} className="flex items-center gap-2 glass-panel p-3 rounded-xl">
-                        <User size={16} />
-                        <span className="flex-1 text-left truncate">{p.name}</span>
+                        <div className="flex items-center gap-2 flex-1">
+                          <User size={16} />
+                          <span className="flex-1 text-left truncate">{p.name}</span>
+                          {p.id === room?.ownerId && (
+                            <span className="flex items-center gap-1 text-xs font-semibold text-primary">
+                              <Crown size={14} /> Host
+                            </span>
+                          )}
+                        </div>
+                        {isHost && p.id !== myId && (
+                          <button onClick={() => kickPlayer(p.id)} className="p-1 rounded hover:bg-white/10">
+                            <X size={16} />
+                          </button>
+                        )}
                         {p.ready ? <CheckCircle2 className="text-success" size={16} /> : <div className="w-4 h-4 rounded-full border-2 border-white/20" />}
                       </div>
                     ))}
                   </div>
-                  <button 
-                    onClick={toggleReady} 
-                    className={`px-8 py-3 rounded-xl font-bold transition-all ${me?.ready ? 'bg-success text-white' : 'bg-primary text-white'}`}
-                  >
-                    {me?.ready ? "Ready!" : "Click to Ready"}
-                  </button>
-                  <p className="text-sm text-muted-foreground italic">Game starts when everyone is ready (min 2 players)</p>
+
+                  {isHost ? (
+                    <div className="w-full max-w-md space-y-3">
+                      <div className="glass-panel p-4 rounded-2xl border border-white/10">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold">Room settings</span>
+                          <button onClick={() => setSettingsOpen(open => !open)} className="text-xs text-muted-foreground">
+                            {settingsOpen ? "Hide" : "Edit"}
+                          </button>
+                        </div>
+                        {settingsOpen && (
+                          <div className="mt-3 space-y-3">
+                            <label className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>Rounds</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={10}
+                                value={pendingMaxRounds}
+                                onChange={e => setPendingMaxRounds(Number(e.target.value))}
+                                className="w-20 px-2 py-1 rounded-lg bg-black/20 border border-white/10 text-sm"
+                              />
+                            </label>
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs text-muted-foreground">Choose algorithms</span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingAlgos([...ALGORITHMS])}
+                                    className="text-[10px] text-primary hover:underline"
+                                  >
+                                    Select all
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingAlgos([])}
+                                    className="text-[10px] text-primary hover:underline"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-2 p-2 bg-black/10 rounded-xl">
+                                {ALGORITHMS.map(algo => (
+                                  <label key={algo} className="flex items-center gap-2 text-xs">
+                                    <input
+                                      type="checkbox"
+                                      checked={pendingAlgos.includes(algo)}
+                                      onChange={e => {
+                                        if (e.target.checked) {
+                                          setPendingAlgos(prev => Array.from(new Set([...prev, algo])) as AlgorithmName[]);
+                                        } else {
+                                          setPendingAlgos(prev => prev.filter(a => a !== algo));
+                                        }
+                                      }}
+                                      className="w-4 h-4"
+                                    />
+                                    <span className="truncate">{algo}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                            <button
+                              onClick={sendRoomOptions}
+                              className="w-full px-4 py-2 rounded-xl bg-primary text-white font-bold hover:opacity-90"
+                            >
+                              Apply settings
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {!myReady ? (
+                          <button
+                            onClick={toggleReady}
+                            className="w-full px-8 py-3 rounded-xl font-bold bg-primary text-white"
+                          >
+                            Click to Ready
+                          </button>
+                        ) : (
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <button
+                              type="button"
+                              onClick={toggleReady}
+                              className="flex h-12 w-12 items-center justify-center rounded-xl bg-success/20 text-success hover:bg-success/30 focus:outline-none focus:ring-2 focus:ring-success/50"
+                              aria-label="Unready"
+                            >
+                              <Check size={18} />
+                            </button>
+                            <div className="flex-1">
+                              <button
+                                onClick={() => {
+                                  if (allReady) {
+                                    sendRoomOptions();
+                                    sendStartRound();
+                                  }
+                                }}
+                                disabled={!allReady}
+                                className="w-full px-8 py-3 rounded-xl font-bold bg-primary text-white hover:opacity-90 disabled:opacity-50"
+                              >
+                                {allReady ? 'Start game' : `Waiting for players (${readyCount}/${players.length})`}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-sm text-muted-foreground italic">
+                          {myReady
+                            ? !allReady
+                              ? 'Waiting for other players to ready up.'
+                              : 'All players are ready — press Start to begin.'
+                            : 'Click ready to unlock Start when everyone is ready.'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={toggleReady} 
+                        className={`px-8 py-3 rounded-xl font-bold transition-all ${me?.ready ? 'bg-success text-white' : 'bg-primary text-white'}`}
+                      >
+                        {me?.ready ? "Ready!" : "Click to Ready"}
+                      </button>
+                      <p className="text-sm text-muted-foreground italic">Game starts when the host starts the round once everyone is ready.</p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -308,14 +555,24 @@ export default function Quiz() {
 
         {/* Choices */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {ALGORITHMS.map(algo => {
+          {visibleAlgos.map((algo: AlgorithmName) => {
             const isSelected = selectedAlgo === algo;
             const isCorrect = algo === currentAlgo;
-            const canGuess = gameState === 'playing' || gameState === 'guessing';
+            const canGuess = (gameState === 'playing' || gameState === 'guessing') && !hasGuessed;
             
             let btnClass = "glass-panel py-3 px-4 text-sm font-medium rounded-xl transition-all duration-300 ";
-            
-            if (canGuess) {
+
+            if (hasGuessed) {
+              if (isSelected) {
+                if (isCorrect) {
+                  btnClass += "bg-success/20 border-success text-success shadow-[0_0_15px_rgba(34,197,94,0.3)] scale-[1.02] z-10";
+                } else {
+                  btnClass += "bg-destructive/20 border-destructive text-destructive";
+                }
+              } else {
+                btnClass += "opacity-40";
+              }
+            } else if (canGuess) {
               btnClass += "hover:bg-white/5 hover:-translate-y-0.5 cursor-pointer hover:border-primary/50";
             } else if (gameState === 'result' || gameState === 'gameover') {
               if (isCorrect) {
@@ -339,15 +596,170 @@ export default function Quiz() {
 
         {/* Round Result Overlay */}
         <AnimatePresence>
-          {gameState === 'result' && room && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="text-center p-4 glass-panel border-success/30 rounded-2xl bg-success/5">
-              <p className="text-success font-bold text-lg mb-1">Round Over!</p>
-              <p className="text-muted-foreground">Winner: <span className="text-foreground font-bold">{lastWinner}</span></p>
-              <p className="text-xs text-muted-foreground mt-2 italic">Next round starting soon...</p>
+          {gameState === 'result' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md"
+            >
+              <div className="w-full max-w-md text-left space-y-4 bg-black/70 border border-white/10 rounded-3xl p-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-widest text-muted-foreground">
+                      Round {room ? room.round : round}{room ? `/${room.maxRounds}` : ""}
+                    </p>
+                    <p className="text-4xl font-black text-primary">
+                      {room
+                        ? lastWinner || "No one"
+                        : selectedAlgo && currentAlgo
+                        ? selectedAlgo === currentAlgo
+                          ? "Correct!"
+                          : "Wrong!"
+                        : "No one"}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {room
+                        ? lastWinner
+                          ? "is the winner"
+                          : "No one guessed correctly"
+                        : selectedAlgo && currentAlgo
+                        ? selectedAlgo === currentAlgo
+                          ? "Great job!"
+                          : "Better luck next time"
+                        : ""
+                      }
+                    </p>
+                    {currentAlgo && (
+                      <p className="text-sm text-muted-foreground">Algorithm: <span className="text-foreground font-semibold">{currentAlgo}</span></p>
+                    )}
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">Round ended</div>
+                </div>
+
+                <div className="grid gap-3">
+                  {isFinalRound ? (
+                    <button
+                      onClick={() => setShowFinalRanking(true)}
+                      className="w-full px-6 py-3 rounded-xl bg-primary text-white font-bold hover:opacity-90"
+                    >
+                      Voir le classement
+                    </button>
+                  ) : room && socketRef.current ? (
+                    isHost ? (
+                      <button
+                        onClick={sendStartRound}
+                        className="w-full px-6 py-3 rounded-xl font-bold bg-primary text-white hover:opacity-90"
+                      >
+                        Next round
+                      </button>
+                    ) : (
+                      <button
+                        disabled
+                        className="w-full px-6 py-3 rounded-xl bg-white/10 text-muted-foreground font-bold cursor-not-allowed"
+                      >
+                        Waiting for host...
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setGameState('playing');
+                        setSelectedAlgo(null);
+                        setHasGuessed(false);
+                        startRound(hardcoreMode);
+                      }}
+                      className="w-full px-6 py-3 rounded-xl bg-primary text-white font-bold hover:opacity-90"
+                    >
+                      Next round
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {showFinalRanking && room && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-md"
+            >
+              <div className="w-full max-w-md text-left space-y-4 bg-black/70 border border-white/10 rounded-3xl p-8">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-widest text-muted-foreground">Classement final</p>
+                    <p className="text-4xl font-black text-primary">{globalWinner || "No one"}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {globalWinner ? "is the winner" : "No one guessed correctly"}
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground">Game over</div>
+                </div>
+
+                <div className="glass-panel p-4 rounded-2xl border border-white/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Classement</span>
+                    <span className="text-xs text-muted-foreground">{sortedPlayers.length} players</span>
+                  </div>
+                  <div className="space-y-2">
+                    {sortedPlayers.map((p, idx) => (
+                      <div key={p.id} className={`flex items-center justify-between text-sm ${p.id === myId ? 'font-bold text-primary' : 'text-muted-foreground'}`}>
+                        <span className="truncate">{idx + 1}. {p.name}</span>
+                        <span className="font-semibold">{p.score}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => {
+                      if (socketRef.current) {
+                        socketRef.current.send(JSON.stringify({ type: "resetRoom", payload: {} }));
+                      }
+                      setShowFinalRanking(false);
+                      setGameState('multiplayer');
+                      setLastWinner(null);
+                      setHasGuessed(false);
+                    }}
+                    className="w-full px-6 py-3 rounded-xl bg-secondary text-secondary-foreground font-bold hover:opacity-90"
+                  >
+                    Back to lobby
+                  </button>
+                  <button
+                    onClick={() => navigate('/')}
+                    className="w-full px-6 py-3 rounded-xl bg-primary text-white font-bold hover:opacity-90"
+                  >
+                    Back to menu
+                  </button>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      {/* Leaderboard (during a round only) */}
+      {room && (gameState === 'playing' || gameState === 'guessing') && sortedPlayers.length > 0 && (
+        <div className="fixed top-4 left-4 right-4 sm:right-auto sm:left-8 z-40">
+          <div className="glass-panel p-4 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leaderboard</span>
+              <span className="text-xs font-semibold text-muted-foreground">Round {room.round}/{room.maxRounds}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {sortedPlayers.slice(0, 6).map((p, idx) => (
+                <div key={p.id} className={`flex items-center justify-between text-sm ${p.id === myId ? 'font-bold text-primary' : 'text-muted-foreground'}`}>
+                  <span className="truncate">{idx + 1}. {p.name}</span>
+                  <span className="font-semibold">{p.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Game Over Modal (Solo) */}
       <AnimatePresence>
@@ -367,9 +779,25 @@ export default function Quiz() {
                 <button type="submit" disabled={createScore.isPending || !playerName.trim()} className="w-full px-6 py-4 rounded-xl font-bold bg-primary text-white hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
                   {createScore.isPending ? <Loader2 className="animate-spin" size={20} /> : <>Submit Score <ArrowRight size={20} /></>}
                 </button>
-                <button type="button" onClick={() => { setScore(0); setHardcoreMode(false); setGameState('idle'); }} className="w-full py-2 text-sm text-muted-foreground hover:text-foreground">
-                  Play Again
-                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startRound(hardcoreMode, { reset: true });
+                      setGameState('playing');
+                    }}
+                    className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Play Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/')}
+                    className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Back to menu
+                  </button>
+                </div>
               </form>
             </motion.div>
           </motion.div>
