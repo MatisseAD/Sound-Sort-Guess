@@ -15,26 +15,40 @@ export default function Zen() {
   const [speed, setSpeed] = useState(50);
 
   const isComponentMounted = useRef(true);
-  const playbackRef = useRef<boolean>(false);
+  const currentRunId = useRef(0); // Remplace le système de Promesse : gère les annulations instantanées
+  const isPausedRef = useRef(false); // Gère la pause sans détruire le générateur
+  const speedRef = useRef(speed);
 
   useEffect(() => {
     isComponentMounted.current = true;
     return () => {
       isComponentMounted.current = false;
-      playbackRef.current = false;
+      currentRunId.current += 1;
     };
   }, []);
 
+  useEffect(() => {
+    speedRef.current = speed;
+  }, [speed]);
+
   const startVisualization = async (algo: AlgorithmName) => {
+    // 1. On incrémente l'ID : cela tue instantanément l'ancienne boucle qui tournait
+    currentRunId.current += 1;
+    const runId = currentRunId.current;
+
     audio.init();
     const newArray = generateRandomArray();
     setSelectedAlgo(algo);
     setArray(newArray);
     setActiveIndices([]);
     setIsPlaying(true);
-    playbackRef.current = true;
+    isPausedRef.current = false;
 
-    await new Promise(r => setTimeout(r, 500));
+    // Petit délai pour animer la transition UX
+    await new Promise((r) => setTimeout(r, 250));
+    // Si on a cliqué sur un autre tri pendant l'attente, on annule
+    if (runId !== currentRunId.current) return;
+
     const generator = getAlgorithmGenerator(algo, newArray);
 
     const speedMap: Record<string, number> = {
@@ -55,56 +69,80 @@ export default function Zen() {
     };
 
     const baseSpeed = speedMap[algo] || 20;
-    
-    // CORRECTION 1 : Logique de vitesse corrigée (plus le slider est haut, plus le délai est court)
-    const delayModifier = 50 / (speed || 1); 
-    const adjustedSpeed = Math.max(10, baseSpeed * delayModifier);
-
-    // CORRECTION 2 : Le timeout restrictif de 30 secondes a été retiré
-
     let steps = 0;
     let currentLocalArray = newArray;
 
     try {
       for (const state of generator) {
-        if (!isComponentMounted.current || !playbackRef.current || steps++ > 10000) break;
-        
-        // Sécurité maximale : si l'étape renvoyée est totalement vide, on passe à la suivante
-        if (!state) continue; 
+        // Sécurité de sortie (démontage, nouveau tri cliqué, ou boucle infinie)
+        if (!isComponentMounted.current || runId !== currentRunId.current || steps++ > 1000000) break;
+
+        // --- LA VRAIE PAUSE : On attend gentiment sans détruire le générateur ---
+        while (isPausedRef.current) {
+          await new Promise(r => setTimeout(r, 100));
+          if (!isComponentMounted.current || runId !== currentRunId.current) return;
+        }
+
+        if (!state) continue;
 
         currentLocalArray = state.array ? [...state.array] : currentLocalArray;
         const currentActive = state.active ? [...state.active] : [];
 
         setArray(currentLocalArray);
         setActiveIndices(currentActive);
-        
-        if (!isMuted) {
-          // On s'assure que audio existe bien avant d'essayer de jouer un son
+
+        if (!isMuted && currentActive.length > 0) {
           if (audio && typeof audio.playTone === 'function') {
-             const valueToPlay = currentLocalArray[currentActive[0] || 0] || 0;
-             audio.playTone(valueToPlay);
+            const valueToPlay = currentLocalArray[currentActive[0]] || 0;
+            if (valueToPlay > 0) {
+              audio.playTone(valueToPlay);
+            }
           }
         }
-        
+
+        const delayModifier = 50 / (speedRef.current || 1);
+        const adjustedSpeed = Math.max(10, baseSpeed * delayModifier);
+
         await new Promise(r => setTimeout(r, adjustedSpeed));
       }
+      
+      // Assure le rendu final parfait
+      if (runId === currentRunId.current) {
+        setArray(currentLocalArray);
+        setActiveIndices([]);
+      }
     } catch (error) {
-      // C'est ICI que l'on va attraper le vrai coupable !
       console.error("💥 CRASH DANS L'ANIMATION :", error);
     } finally {
-      // Quoi qu'il arrive (succès ou crash), on remet l'interface à zéro proprement
-      setIsPlaying(false);
-      playbackRef.current = false;
+      // On remet le bouton sur Play uniquement si c'est ce tri-là qui vient de finir
+      if (runId === currentRunId.current) {
+        setIsPlaying(false);
+        isPausedRef.current = false;
+      }
     }
-  }; // <-- Fin de ta fonction startVisualization
+  };
 
-  const stopVisualization = () => {
-    playbackRef.current = false;
-    setIsPlaying(false);
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      // En cours de lecture -> on met en pause
+      isPausedRef.current = true;
+      setIsPlaying(false);
+    } else {
+      if (isPausedRef.current) {
+        // Était en pause -> on reprend
+        isPausedRef.current = false;
+        setIsPlaying(true);
+      } else {
+        // N'était pas en pause (soit terminé, soit jamais lancé) -> on relance à zéro
+        if (selectedAlgo) startVisualization(selectedAlgo);
+      }
+    }
   };
 
   const resetVisualization = () => {
-    stopVisualization();
+    currentRunId.current += 1; // Tue l'animation instantanément
+    isPausedRef.current = false;
+    setIsPlaying(false);
     setArray([]);
     setActiveIndices([]);
     setSelectedAlgo(null);
@@ -162,12 +200,11 @@ export default function Zen() {
                   <button
                     key={algo}
                     onClick={() => startVisualization(algo)}
-                    disabled={isPlaying}
                     className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
                       selectedAlgo === algo
-                        ? 'bg-primary text-primary-foreground'
+                        ? 'bg-primary text-primary-foreground cursor-default'
                         : 'hover:bg-white/5 text-muted-foreground hover:text-foreground'
-                    } ${isPlaying ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    }`}
                   >
                     {algo}
                   </button>
@@ -191,7 +228,7 @@ export default function Zen() {
                   {selectedAlgo && (
                     <>
                       <button
-                        onClick={isPlaying ? stopVisualization : () => selectedAlgo && startVisualization(selectedAlgo)}
+                        onClick={handlePlayPause}
                         className="p-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                       >
                         {isPlaying ? <Pause size={20} /> : <Play size={20} />}
@@ -222,7 +259,7 @@ export default function Zen() {
                       algorithm={selectedAlgo}
                     />
                     <div className="text-center text-muted-foreground">
-                      {isPlaying ? 'Playing...' : 'Paused'}
+                      {isPlaying ? 'Playing...' : (isPausedRef.current ? 'Paused' : 'Finished')}
                     </div>
                   </motion.div>
                 ) : (
@@ -230,7 +267,9 @@ export default function Zen() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="text-center py-12 text-muted-foreground"
-                  >                  </motion.div>
+                  >
+                    Choose an algorithm from the list to see its visualization
+                  </motion.div>
                 )}
               </AnimatePresence>
             </div>

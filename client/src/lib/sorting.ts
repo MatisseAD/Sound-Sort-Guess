@@ -30,10 +30,8 @@ export const ALGORITHMS = [
   'Gravity Sort',
   'Circle Sort',
   'Double Selection Sort',
-  'Tree Sort',
   'Binary Insertion Sort',
   'Bucket Sort',
-  'Pigeonhole Sort',
   'Exchange Sort',
 ] as const;
 
@@ -501,16 +499,11 @@ export function* stoogeSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
-// -----------------------------------------------------
-// --- RETOUR DE BOGO, BOZO, STALIN ET SLEEP SORT ! ---
-// -----------------------------------------------------
-
 export function* bogoSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const isSorted = (array: number[]) => array.every((val, i, array) => i === 0 || val >= array[i - 1]);
   
   while (!isSorted(a)) {
-    // Mélange complet (Fisher-Yates)
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [a[i], a[j]] = [a[j], a[i]];
@@ -525,7 +518,6 @@ export function* bozoSort(arr: number[]): Generator<SortState> {
   const isSorted = (array: number[]) => array.every((val, i, array) => i === 0 || val >= array[i - 1]);
   
   while (!isSorted(a)) {
-    // Échange de deux éléments au hasard
     const i = Math.floor(Math.random() * a.length);
     const j = Math.floor(Math.random() * a.length);
     [a[i], a[j]] = [a[j], a[i]];
@@ -537,13 +529,12 @@ export function* bozoSort(arr: number[]): Generator<SortState> {
 export function* stalinSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   let i = 1;
-  // Élimination progressive ! Le tableau va rétrécir à l'écran.
   while (i < a.length) {
     yield { array: [...a], active: [i, i - 1] };
     if (a[i] >= a[i - 1]) {
       i++;
     } else {
-      a.splice(i, 1); // Exécution (suppression) du rebelle
+      a.splice(i, 1); 
       yield { array: [...a], active: [i - 1] };
     }
   }
@@ -556,7 +547,7 @@ export function* sleepSort(arr: number[]): Generator<SortState> {
   let sortedPart: number[] = [];
   let waitingPart: number[] = [...a];
 
-  // On simule le passage du temps tick par tick
+  // Le temps passe ! On yield à chaque tick d'horloge.
   for (let tick = 0; tick <= max; tick++) {
     let wokeUpThisTick: number[] = [];
     let newWaitingPart: number[] = [];
@@ -569,22 +560,23 @@ export function* sleepSort(arr: number[]): Generator<SortState> {
       }
     }
 
-    // Si des éléments se sont réveillés à cette frame
     if (wokeUpThisTick.length > 0) {
       waitingPart = newWaitingPart;
       sortedPart.push(...wokeUpThisTick);
-      
-      // On combine ceux triés au début, et ceux qui dorment encore à la fin
-      const currentArray = [...sortedPart, ...waitingPart];
-      const activeIndices = wokeUpThisTick.map((_, idx) => sortedPart.length - 1 - idx);
-      
-      yield { array: currentArray, active: activeIndices };
     }
+    
+    // On met à jour l'écran à CHAQUE tick, qu'il y ait des réveils ou non.
+    const currentArray = [...sortedPart, ...waitingPart];
+    
+    // On met en surbrillance uniquement ceux qui viennent de se réveiller
+    const activeIndices = wokeUpThisTick.length > 0 
+      ? wokeUpThisTick.map((_, idx) => sortedPart.length - wokeUpThisTick.length + idx) 
+      : [];
+    
+    yield { array: currentArray, active: activeIndices };
   }
   yield { array: sortedPart, active: [] };
 }
-
-// -----------------------------------------------------
 
 function* slowSortHelper(a: number[], i: number, j: number): Generator<SortState> {
   if (i >= j) return;
@@ -608,32 +600,45 @@ export function* slowSort(arr: number[]): Generator<SortState> {
 export function* beadSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const max = Math.max(...a);
+  
+  // On place les "perles" sur le boulier (la grille)
   const beads = Array.from({ length: a.length }, () => Array(max).fill(0));
   for (let i = 0; i < a.length; i++) {
     for (let j = 0; j < a[i]; j++) {
       beads[i][j] = 1;
     }
-    yield { array: [...a], active: [i] };
   }
+
+  // On fait tomber les perles colonne par colonne (vers la droite)
   for (let j = 0; j < max; j++) {
-    let sum = 0;
+    let count = 0;
+    
     for (let i = 0; i < a.length; i++) {
-      sum += beads[i][j];
-      beads[i][j] = 0;
+      if (beads[i][j] === 1) count++;
+      beads[i][j] = 0; 
     }
-    for (let i = a.length - sum; i < a.length; i++) {
+    
+    // On repère quelles barres reçoivent les perles pour les colorer et jouer leur son
+    const activeIndices: number[] = [];
+    for (let i = a.length - count; i < a.length; i++) {
       beads[i][j] = 1;
+      activeIndices.push(i); // <-- L'astuce est ici !
     }
-    yield { array: [...a], active: [] };
-  }
-  for (let i = 0; i < a.length; i++) {
-    let sum = 0;
-    for (let j = 0; j < max; j++) {
-      sum += beads[i][j];
+    
+    for (let i = 0; i < a.length; i++) {
+      let sum = 0;
+      for (let k = 0; k < max; k++) {
+        sum += beads[i][k];
+      }
+      a[i] = sum;
     }
-    a[i] = sum;
-    yield { array: [...a], active: [i] };
+    
+    // On envoie les indices actifs à l'interface et à l'audio
+    if (activeIndices.length > 0) {
+      yield { array: [...a], active: activeIndices };
+    }
   }
+  
   yield { array: [...a], active: [] };
 }
 
@@ -688,43 +693,6 @@ export function* doubleSelectionSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
-class TreeNode {
-  val: number;
-  left: TreeNode | null = null;
-  right: TreeNode | null = null;
-  constructor(val: number) {
-    this.val = val;
-  }
-}
-
-function insert(node: TreeNode | null, val: number): TreeNode {
-  if (!node) return new TreeNode(val);
-  if (val < node.val) node.left = insert(node.left, val);
-  else node.right = insert(node.right, val);
-  return node;
-}
-
-export function* treeSort(arr: number[]): Generator<SortState> {
-  const a = [...arr];
-  let root: TreeNode | null = null;
-  for (let i = 0; i < a.length; i++) {
-    root = insert(root, a[i]);
-    yield { array: [...a], active: [i] };
-  }
-  let idx = 0;
-  function* inorderGen(node: TreeNode | null): Generator<SortState> {
-    if (node) {
-      yield* inorderGen(node.left);
-      a[idx] = node.val;
-      yield { array: [...a], active: [idx] };
-      idx++;
-      yield* inorderGen(node.right);
-    }
-  }
-  yield* inorderGen(root);
-  yield { array: [...a], active: [] };
-}
-
 export function* binaryInsertionSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   for (let i = 1; i < a.length; i++) {
@@ -754,45 +722,34 @@ export function* bucketSort(arr: number[]): Generator<SortState> {
   const bucketCount = Math.floor(Math.sqrt(a.length)) || 1;
   const buckets: number[][] = Array.from({ length: bucketCount }, () => []);
   const range = (max - min + 1) / bucketCount;
+  
   for (let i = 0; i < a.length; i++) {
     const bucketIndex = Math.floor((a[i] - min) / range);
     buckets[Math.min(bucketIndex, bucketCount - 1)].push(a[i]);
     yield { array: [...a], active: [i] };
   }
+  
   let idx = 0;
-  for (let bucket of buckets) {
-    for (let i = 1; i < bucket.length; i++) {
-      let key = bucket[i];
-      let j = i - 1;
-      while (j >= 0 && bucket[j] > key) {
-        bucket[j + 1] = bucket[j];
-        j--;
-      }
-      bucket[j + 1] = key;
-    }
+  for (let b = 0; b < buckets.length; b++) {
+    const bucket = buckets[b];
+    const startIdx = idx;
+    
     for (let val of bucket) {
       a[idx++] = val;
       yield { array: [...a], active: [idx - 1] };
     }
-  }
-  yield { array: [...a], active: [] };
-}
-
-export function* pigeonholeSort(arr: number[]): Generator<SortState> {
-  const a = [...arr];
-  const min = Math.min(...a);
-  const max = Math.max(...a);
-  const range = max - min + 1;
-  const holes = Array(range).fill(0);
-  for (let i = 0; i < a.length; i++) {
-    holes[a[i] - min]++;
-    yield { array: [...a], active: [i] };
-  }
-  let idx = 0;
-  for (let i = 0; i < range; i++) {
-    while (holes[i]-- > 0) {
-      a[idx++] = i + min;
-      yield { array: [...a], active: [idx - 1] };
+    
+    for (let i = startIdx + 1; i < idx; i++) {
+      let key = a[i];
+      let j = i - 1;
+      yield { array: [...a], active: [i] };
+      while (j >= startIdx && a[j] > key) {
+        yield { array: [...a], active: [j, j + 1] };
+        a[j + 1] = a[j];
+        j--;
+      }
+      a[j + 1] = key;
+      yield { array: [...a], active: [j + 1] };
     }
   }
   yield { array: [...a], active: [] };
@@ -840,10 +797,8 @@ export function getAlgorithmGenerator(name: AlgorithmName, arr: number[]): Gener
     case 'Gravity Sort': return beadSort(arr);
     case 'Circle Sort': return circleSort(arr);
     case 'Double Selection Sort': return doubleSelectionSort(arr);
-    case 'Tree Sort': return treeSort(arr);
     case 'Binary Insertion Sort': return binaryInsertionSort(arr);
     case 'Bucket Sort': return bucketSort(arr);
-    case 'Pigeonhole Sort': return pigeonholeSort(arr);
     case 'Exchange Sort': return exchangeSort(arr);
     default: return bubbleSort(arr);
   }

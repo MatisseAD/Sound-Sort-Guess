@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { Play, Trophy, Headphones, Eye } from "lucide-react";
+import { Play, Trophy, Headphones, Eye, User, LogOut, UserPlus, LogIn } from "lucide-react";
+import { useAuth, useLogout } from "@/hooks/use-auth";
 
 export default function Home() {
   const { data: user } = useAuth();

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
 import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName } from "@/lib/sorting";
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
-import { Volume2, VolumeX, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff } from "lucide-react";
+import { Volume2, VolumeX, ArrowLeft, ArrowRight, Loader2, Users, User, Play, CheckCircle2, Copy, Check, EyeOff } from "lucide-react";
 
 type Message = {
   type: string;
@@ -187,13 +187,22 @@ export default function Quiz() {
         
         {/* Header */}
         <div className="flex justify-between items-center glass-panel px-6 py-4 rounded-2xl">
-          <div className="text-xl font-bold flex items-center gap-2">
-            {room ? `Room: ${room.id}` : `Score: ${score}`}
-            {hardcoreMode && (
-              <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30">
-                Hardcore
-              </span>
-            )}
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft size={18} />
+              <span className="text-sm">Back</span>
+            </Link>
+            <div className="text-xl font-bold flex items-center gap-2">
+              {room ? `Room: ${room.id}` : `Score: ${score}`}
+              {hardcoreMode && (
+                <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30">
+                  Hardcore
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-4">
             {room && (
