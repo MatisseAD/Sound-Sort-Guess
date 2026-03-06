@@ -22,6 +22,19 @@ export const ALGORITHMS = [
   'Tim Sort',
   'Bitonic Sort',
   'Stooge Sort',
+  'Bogo Sort',
+  'Bozo Sort',
+  'Stalin Sort',
+  'Sleep Sort',
+  'Slow Sort',
+  'Gravity Sort',
+  'Circle Sort',
+  'Double Selection Sort',
+  'Tree Sort',
+  'Binary Insertion Sort',
+  'Bucket Sort',
+  'Pigeonhole Sort',
+  'Exchange Sort',
 ] as const;
 
 export type AlgorithmName = typeof ALGORITHMS[number];
@@ -57,12 +70,9 @@ export function* cocktailSort(arr: number[]): Generator<SortState> {
         yield { array: [...a], active: [i, i + 1] };
       }
     }
-
     if (!swapped) break;
-
     swapped = false;
     --end;
-
     for (let i = end - 1; i >= start; --i) {
       yield { array: [...a], active: [i, i + 1] };
       if (a[i] > a[i + 1]) {
@@ -103,7 +113,6 @@ export function* heapSort(arr: number[]): Generator<SortState> {
   for (let i = Math.floor(n / 2) - 1; i >= 0; i--) {
     yield* heapify(n, i);
   }
-
   for (let i = n - 1; i > 0; i--) {
     [a[0], a[i]] = [a[i], a[0]];
     yield { array: [...a], active: [0, i] };
@@ -115,7 +124,6 @@ export function* heapSort(arr: number[]): Generator<SortState> {
 export function* shellSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
-
   for (let gap = Math.floor(n / 2); gap > 0; gap = Math.floor(gap / 2)) {
     for (let i = gap; i < n; i++) {
       const temp = a[i];
@@ -170,7 +178,6 @@ export function* insertionSort(arr: number[]): Generator<SortState> {
 
 export function* quickSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-  
   function* partition(low: number, high: number): Generator<SortState, number> {
     const pivot = a[high];
     let i = low - 1;
@@ -186,7 +193,6 @@ export function* quickSort(arr: number[]): Generator<SortState> {
     yield { array: [...a], active: [i + 1, high] };
     return i + 1;
   }
-
   function* qs(low: number, high: number): Generator<SortState> {
     if (low < high) {
       const pi: number = yield* partition(low, high);
@@ -194,23 +200,19 @@ export function* quickSort(arr: number[]): Generator<SortState> {
       yield* qs(pi + 1, high);
     }
   }
-
   yield* qs(0, a.length - 1);
   yield { array: [...a], active: [] };
 }
 
 export function* mergeSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-
   function* merge(l: number, m: number, r: number): Generator<SortState> {
     const n1 = m - l + 1;
     const n2 = r - m;
     const L = new Array(n1);
     const R = new Array(n2);
-
     for (let i = 0; i < n1; i++) L[i] = a[l + i];
     for (let j = 0; j < n2; j++) R[j] = a[m + 1 + j];
-
     let i = 0, j = 0, k = l;
     while (i < n1 && j < n2) {
       yield { array: [...a], active: [l + i, m + 1 + j] };
@@ -224,14 +226,12 @@ export function* mergeSort(arr: number[]): Generator<SortState> {
       yield { array: [...a], active: [k] };
       k++;
     }
-
     while (i < n1) {
       a[k] = L[i];
       yield { array: [...a], active: [k] };
       i++;
       k++;
     }
-
     while (j < n2) {
       a[k] = R[j];
       yield { array: [...a], active: [k] };
@@ -239,7 +239,6 @@ export function* mergeSort(arr: number[]): Generator<SortState> {
       k++;
     }
   }
-
   function* ms(l: number, r: number): Generator<SortState> {
     if (l >= r) return;
     const m = l + Math.floor((r - l) / 2);
@@ -247,7 +246,6 @@ export function* mergeSort(arr: number[]): Generator<SortState> {
     yield* ms(m + 1, r);
     yield* merge(l, m, r);
   }
-
   yield* ms(0, a.length - 1);
   yield { array: [...a], active: [] };
 }
@@ -359,7 +357,6 @@ export function* oddEvenSort(arr: number[]): Generator<SortState> {
 
 export function* pancakeSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-
   function* flip(k: number): Generator<SortState> {
     let left = 0, right = k;
     while (left < right) {
@@ -370,7 +367,6 @@ export function* pancakeSort(arr: number[]): Generator<SortState> {
       right--;
     }
   }
-
   for (let size = a.length; size > 1; size--) {
     let maxIdx = 0;
     for (let i = 1; i < size; i++) {
@@ -416,8 +412,7 @@ export function* cycleSort(arr: number[]): Generator<SortState> {
 export function* timSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
-  const RUN = 8; // standard insertion-sort run size used by Tim Sort
-
+  const RUN = 8;
   function* insertRun(left: number, right: number): Generator<SortState> {
     for (let i = left + 1; i <= right; i++) {
       const temp = a[i];
@@ -431,7 +426,6 @@ export function* timSort(arr: number[]): Generator<SortState> {
       a[j + 1] = temp;
     }
   }
-
   function* mergeRuns(l: number, m: number, r: number): Generator<SortState> {
     const left = a.slice(l, m + 1);
     const right = a.slice(m + 1, r + 1);
@@ -445,7 +439,6 @@ export function* timSort(arr: number[]): Generator<SortState> {
     while (i < left.length) { a[k] = left[i++]; yield { array: [...a], active: [k++] }; }
     while (j < right.length) { a[k] = right[j++]; yield { array: [...a], active: [k++] }; }
   }
-
   for (let i = 0; i < n; i += RUN) {
     yield* insertRun(i, Math.min(i + RUN - 1, n - 1));
   }
@@ -462,7 +455,6 @@ export function* timSort(arr: number[]): Generator<SortState> {
 export function* bitonicSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;
-
   function* compAndSwap(i: number, j: number, asc: boolean): Generator<SortState> {
     yield { array: [...a], active: [i, j] };
     if (asc ? a[i] > a[j] : a[i] < a[j]) {
@@ -470,7 +462,6 @@ export function* bitonicSort(arr: number[]): Generator<SortState> {
       yield { array: [...a], active: [i, j] };
     }
   }
-
   function* bitonicMerge(lo: number, cnt: number, asc: boolean): Generator<SortState> {
     if (cnt > 1) {
       const k = Math.floor(cnt / 2);
@@ -479,7 +470,6 @@ export function* bitonicSort(arr: number[]): Generator<SortState> {
       yield* bitonicMerge(lo + k, cnt - k, asc);
     }
   }
-
   function* bitonicSortRec(lo: number, cnt: number, asc: boolean): Generator<SortState> {
     if (cnt > 1) {
       const k = Math.floor(cnt / 2);
@@ -488,14 +478,12 @@ export function* bitonicSort(arr: number[]): Generator<SortState> {
       yield* bitonicMerge(lo, cnt, asc);
     }
   }
-
   yield* bitonicSortRec(0, n, true);
   yield { array: [...a], active: [] };
 }
 
 export function* stoogeSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-
   function* stooge(l: number, h: number): Generator<SortState> {
     yield { array: [...a], active: [l, h] };
     if (a[l] > a[h]) {
@@ -509,15 +497,20 @@ export function* stoogeSort(arr: number[]): Generator<SortState> {
       yield* stooge(l, h - t);
     }
   }
-
   yield* stooge(0, a.length - 1);
   yield { array: [...a], active: [] };
 }
 
+// -----------------------------------------------------
+// --- RETOUR DE BOGO, BOZO, STALIN ET SLEEP SORT ! ---
+// -----------------------------------------------------
+
 export function* bogoSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-  const isSorted = (arr: number[]) => arr.every((val, i, arr) => i === 0 || val >= arr[i-1]);
+  const isSorted = (array: number[]) => array.every((val, i, array) => i === 0 || val >= array[i - 1]);
+  
   while (!isSorted(a)) {
+    // Mélange complet (Fisher-Yates)
     for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [a[i], a[j]] = [a[j], a[i]];
@@ -529,8 +522,10 @@ export function* bogoSort(arr: number[]): Generator<SortState> {
 
 export function* bozoSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-  const isSorted = (arr: number[]) => arr.every((val, i, arr) => i === 0 || val >= arr[i-1]);
+  const isSorted = (array: number[]) => array.every((val, i, array) => i === 0 || val >= array[i - 1]);
+  
   while (!isSorted(a)) {
+    // Échange de deux éléments au hasard
     const i = Math.floor(Math.random() * a.length);
     const j = Math.floor(Math.random() * a.length);
     [a[i], a[j]] = [a[j], a[i]];
@@ -541,20 +536,55 @@ export function* bozoSort(arr: number[]): Generator<SortState> {
 
 export function* stalinSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
-  const result: number[] = [];
-  for (let i = 0; i < a.length; i++) {
-    yield { array: [...a], active: [i] };
-    if (result.length === 0 || a[i] >= result[result.length - 1]) {
-      result.push(a[i]);
+  let i = 1;
+  // Élimination progressive ! Le tableau va rétrécir à l'écran.
+  while (i < a.length) {
+    yield { array: [...a], active: [i, i - 1] };
+    if (a[i] >= a[i - 1]) {
+      i++;
+    } else {
+      a.splice(i, 1); // Exécution (suppression) du rebelle
+      yield { array: [...a], active: [i - 1] };
     }
   }
-  yield { array: [...result], active: [] };
+  yield { array: [...a], active: [] };
 }
 
 export function* sleepSort(arr: number[]): Generator<SortState> {
-  const a = [...arr].sort((a, b) => a - b);
-  yield { array: [...a], active: [] };
+  const a = [...arr];
+  const max = Math.max(...a);
+  let sortedPart: number[] = [];
+  let waitingPart: number[] = [...a];
+
+  // On simule le passage du temps tick par tick
+  for (let tick = 0; tick <= max; tick++) {
+    let wokeUpThisTick: number[] = [];
+    let newWaitingPart: number[] = [];
+
+    for (let i = 0; i < waitingPart.length; i++) {
+      if (waitingPart[i] === tick) {
+        wokeUpThisTick.push(waitingPart[i]);
+      } else {
+        newWaitingPart.push(waitingPart[i]);
+      }
+    }
+
+    // Si des éléments se sont réveillés à cette frame
+    if (wokeUpThisTick.length > 0) {
+      waitingPart = newWaitingPart;
+      sortedPart.push(...wokeUpThisTick);
+      
+      // On combine ceux triés au début, et ceux qui dorment encore à la fin
+      const currentArray = [...sortedPart, ...waitingPart];
+      const activeIndices = wokeUpThisTick.map((_, idx) => sortedPart.length - 1 - idx);
+      
+      yield { array: currentArray, active: activeIndices };
+    }
+  }
+  yield { array: sortedPart, active: [] };
 }
+
+// -----------------------------------------------------
 
 function* slowSortHelper(a: number[], i: number, j: number): Generator<SortState> {
   if (i >= j) return;
@@ -636,11 +666,6 @@ export function* circleSort(arr: number[]): Generator<SortState> {
   yield { array: [...a], active: [] };
 }
 
-export function* spaghettiSort(arr: number[]): Generator<SortState> {
-  const a = [...arr].sort((a, b) => a - b);
-  yield { array: [...a], active: [] };
-}
-
 export function* doubleSelectionSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   for (let i = 0; i < Math.floor(a.length / 2); i++) {
@@ -679,14 +704,6 @@ function insert(node: TreeNode | null, val: number): TreeNode {
   return node;
 }
 
-function inorder(node: TreeNode | null, result: number[]) {
-  if (node) {
-    inorder(node.left, result);
-    result.push(node.val);
-    inorder(node.right, result);
-  }
-}
-
 export function* treeSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   let root: TreeNode | null = null;
@@ -694,9 +711,18 @@ export function* treeSort(arr: number[]): Generator<SortState> {
     root = insert(root, a[i]);
     yield { array: [...a], active: [i] };
   }
-  const result: number[] = [];
-  inorder(root, result);
-  yield { array: [...result], active: [] };
+  let idx = 0;
+  function* inorderGen(node: TreeNode | null): Generator<SortState> {
+    if (node) {
+      yield* inorderGen(node.left);
+      a[idx] = node.val;
+      yield { array: [...a], active: [idx] };
+      idx++;
+      yield* inorderGen(node.right);
+    }
+  }
+  yield* inorderGen(root);
+  yield { array: [...a], active: [] };
 }
 
 export function* binaryInsertionSort(arr: number[]): Generator<SortState> {
@@ -722,11 +748,12 @@ export function* binaryInsertionSort(arr: number[]): Generator<SortState> {
 
 export function* bucketSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
+  if (a.length === 0) return;
   const min = Math.min(...a);
   const max = Math.max(...a);
   const bucketCount = Math.floor(Math.sqrt(a.length)) || 1;
   const buckets: number[][] = Array.from({ length: bucketCount }, () => []);
-  const range = (max - min) / bucketCount;
+  const range = (max - min + 1) / bucketCount;
   for (let i = 0; i < a.length; i++) {
     const bucketIndex = Math.floor((a[i] - min) / range);
     buckets[Math.min(bucketIndex, bucketCount - 1)].push(a[i]);
@@ -734,7 +761,15 @@ export function* bucketSort(arr: number[]): Generator<SortState> {
   }
   let idx = 0;
   for (let bucket of buckets) {
-    bucket.sort((a, b) => a - b);
+    for (let i = 1; i < bucket.length; i++) {
+      let key = bucket[i];
+      let j = i - 1;
+      while (j >= 0 && bucket[j] > key) {
+        bucket[j + 1] = bucket[j];
+        j--;
+      }
+      bucket[j + 1] = key;
+    }
     for (let val of bucket) {
       a[idx++] = val;
       yield { array: [...a], active: [idx - 1] };
@@ -804,18 +839,9 @@ export function getAlgorithmGenerator(name: AlgorithmName, arr: number[]): Gener
     case 'Slow Sort': return slowSort(arr);
     case 'Gravity Sort': return beadSort(arr);
     case 'Circle Sort': return circleSort(arr);
-    case 'Spaghetti Sort': return spaghettiSort(arr);
     case 'Double Selection Sort': return doubleSelectionSort(arr);
-    case 'Smooth Sort': return heapSort(arr);
-    case 'Intro Sort': return quickSort(arr);
     case 'Tree Sort': return treeSort(arr);
-    case 'Block Sort': return mergeSort(arr);
-    case 'Odd-Even Merge Sort': return mergeSort(arr);
-    case 'Strand Sort': return insertionSort(arr);
-    case 'Flash Sort': return bucketSort(arr);
-    case 'Library Sort': return insertionSort(arr);
     case 'Binary Insertion Sort': return binaryInsertionSort(arr);
-    case 'Tournament Sort': return heapSort(arr);
     case 'Bucket Sort': return bucketSort(arr);
     case 'Pigeonhole Sort': return pigeonholeSort(arr);
     case 'Exchange Sort': return exchangeSort(arr);

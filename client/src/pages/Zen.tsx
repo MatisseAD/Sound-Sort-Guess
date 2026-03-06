@@ -80,9 +80,9 @@ export default function Zen() {
         
         if (!isMuted) {
           // On s'assure que audio existe bien avant d'essayer de jouer un son
-          if (audio && typeof audio.playNote === 'function') {
+          if (audio && typeof audio.playTone === 'function') {
              const valueToPlay = currentLocalArray[currentActive[0] || 0] || 0;
-             audio.playNote(valueToPlay);
+             audio.playTone(valueToPlay);
           }
         }
         
