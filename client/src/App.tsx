@@ -9,8 +9,7 @@ import NotFound from "@/pages/not-found";
 import Home from "./pages/Home";
 import Quiz from "./pages/Quiz";
 import Leaderboard from "./pages/Leaderboard";
-import Register from "./pages/Register";
-import Login from "./pages/Login";
+import Zen from "./pages/Zen";
 
 function Router() {
   return (
@@ -18,8 +17,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/quiz" component={Quiz} />
       <Route path="/leaderboard" component={Leaderboard} />
-      <Route path="/register" component={Register} />
-      <Route path="/login" component={Login} />
+      <Route path="/zen" component={Zen} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>

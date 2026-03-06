@@ -16,8 +16,7 @@ export function AudioVisualizer({ array, activeIndices, maxValue = 100 }: AudioV
         return (
           <motion.div
             key={idx}
-            layout
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            transition={{ duration: 0 }}
             className={`w-full max-w-[12px] rounded-t-sm ${
               isActive 
                 ? 'bg-accent shadow-[0_0_10px_rgba(217,70,239,0.8)]' 
