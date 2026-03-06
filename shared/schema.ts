@@ -26,9 +26,41 @@ export const players = pgTable("players", {
   socketId: text("socket_id"),
 });
 
+export const utilisateurs = pgTable("utilisateurs", {
+  id: serial("id").primaryKey(),
+  pseudo: varchar("pseudo", { length: 50 }).unique().notNull(),
+  pointsBoutiques: integer("points_boutiques").default(0),
+  score: integer("score").default(0),
+  mail: varchar("mail", { length: 255 }).unique().notNull(),
+  motDePasse: varchar("mot_de_passe", { length: 255 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  lastLogin: timestamp("last_login"),
+});
+
 export const insertScoreSchema = createInsertSchema(scores).omit({ id: true, createdAt: true });
+
+export const insertUtilisateurSchema = createInsertSchema(utilisateurs).omit({
+  id: true,
+  createdAt: true,
+  lastLogin: true,
+  pointsBoutiques: true,
+  score: true,
+});
+
+export const registerSchema = insertUtilisateurSchema.extend({
+  pseudo: z.string().min(3).max(50),
+  mail: z.string().email(),
+  motDePasse: z.string().min(8),
+});
+
+export const loginSchema = z.object({
+  mail: z.string().email(),
+  motDePasse: z.string().min(1),
+});
 
 export type Score = typeof scores.$inferSelect;
 export type InsertScore = z.infer<typeof insertScoreSchema>;
 export type Room = typeof rooms.$inferSelect;
 export type Player = typeof players.$inferSelect;
+export type Utilisateur = typeof utilisateurs.$inferSelect;
+export type InsertUtilisateur = z.infer<typeof insertUtilisateurSchema>;
