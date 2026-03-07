@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
-import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName, getProgressiveAlgos, getNextUnlockRound, ALGO_PROGRESSION } from "@/lib/sorting";
+import { ALGORITHMS, generateRandomArray, getAlgorithmGenerator, AlgorithmName, getProgressiveAlgos, getNextUnlockRound, getTimerProgressiveAlgos, getTimerNextUnlockRound, getTimerUnlockGroupIndex, ALGO_PROGRESSION } from "@/lib/sorting";
 import { audio } from "@/lib/audio";
 import { AudioVisualizer } from "@/components/AudioVisualizer";
 import { useCreateScore } from "@/hooks/use-scores";
@@ -18,6 +18,7 @@ type Message = {
 export default function Quiz() {
   const [, navigate] = useLocation();
   const [score, setScore] = useState(0);
+  const scoreRef = useRef(score);
   const [round, setRound] = useState(0);
   const [currentAlgo, setCurrentAlgo] = useState<AlgorithmName | null>(null);
   const [array, setArray] = useState<number[]>([]);
@@ -31,17 +32,78 @@ export default function Quiz() {
   
   const [playerName, setPlayerName] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
-  const [hardcoreMode, setHardcoreMode] = useState(false);
+
+  const [pendingMode, setPendingMode] = useState<'classic' | 'time-trial'>('classic');
+  const [pendingHardcore, setPendingHardcore] = useState(false);
+  const [pendingProgressive, setPendingProgressive] = useState(true);
+  const [pendingMarathon, setPendingMarathon] = useState(false);
+  const [pendingBaseGroup, setPendingBaseGroup] = useState(0);
+  const [pendingPreset, setPendingPreset] = useState<'classic' | 'noob' | 'pro' | 'hacker'>('classic');
+
+  const [gameMode, setGameMode] = useState<'normal' | 'hardcore' | 'timer' | 'timer-hardcore'>('normal');
+  const [timeLeftMs, setTimeLeftMs] = useState(60_000);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const timeLeftRef = useRef(60_000);
+  const elapsedRef = useRef(0);
+  const timerInterval = useRef<number | null>(null);
+  const lastTickRef = useRef<number | null>(null);
+  const coinsAwardedRef = useRef(false);
+
+  const hardcoreMode = gameMode === 'hardcore' || gameMode === 'timer-hardcore';
+  const timerMode = gameMode === 'timer' || gameMode === 'timer-hardcore';
+
+  const formatTime = (ms: number) => (ms > 0 ? (ms / 1000).toFixed(2) : '0.00');
+
+  const startTimerInterval = (countdown: boolean) => {
+    lastTickRef.current = Date.now();
+    if (timerInterval.current) window.clearInterval(timerInterval.current);
+
+    timerInterval.current = window.setInterval(() => {
+      const now = Date.now();
+      const last = lastTickRef.current ?? now;
+      const delta = Math.max(0, now - last);
+      lastTickRef.current = now;
+
+      if (countdown) {
+        const nextMs = Math.max(0, timeLeftRef.current - delta);
+        timeLeftRef.current = nextMs;
+        setTimeLeftMs(nextMs);
+
+        if (nextMs <= 0) {
+          if (timerInterval.current) window.clearInterval(timerInterval.current);
+          playbackRef.current = false;
+          setGameState('gameover');
+        }
+      } else {
+        const nextMs = elapsedRef.current + delta;
+        elapsedRef.current = nextMs;
+        setElapsedMs(nextMs);
+      }
+    }, 50);
+  };
+
+  const stopTimerInterval = () => {
+    if (timerInterval.current) {
+      window.clearInterval(timerInterval.current);
+      timerInterval.current = null;
+    }
+  };
+
   const createScore = useCreateScore();
   const { data: user } = useAuth();
   const { mutate: updateStats } = useUpdateStats();
 
   // Progression: algorithms available for current round
-  const progressiveAlgos = useMemo(
-    () => (gameState === 'idle' || round === 0) ? getProgressiveAlgos(0, false) : getProgressiveAlgos(round, hardcoreMode),
-    [round, hardcoreMode, gameState]
-  );
-  const nextUnlockRound = useMemo(() => getNextUnlockRound(round, hardcoreMode), [round, hardcoreMode]);
+  const progressiveAlgos = useMemo(() => {
+    if (gameState === 'idle' || round === 0) return getProgressiveAlgos(0, false);
+    if (timerMode) return getTimerProgressiveAlgos(score, hardcoreMode);
+    return getProgressiveAlgos(round, hardcoreMode);
+  }, [round, score, hardcoreMode, gameState, timerMode]);
+
+  const nextUnlockRound = useMemo(() => {
+    if (timerMode) return getTimerNextUnlockRound(score, hardcoreMode);
+    return getNextUnlockRound(round, hardcoreMode);
+  }, [round, score, hardcoreMode, timerMode]);
 
   // Equipped theme from user profile
   const equippedTheme = (user?.equippedTheme ?? 'default') as VisualizerTheme;
@@ -62,6 +124,8 @@ export default function Quiz() {
   const [globalWinner, setGlobalWinner] = useState<string | null>(null);
   const [isFinalRound, setIsFinalRound] = useState(false);
   const [showFinalRanking, setShowFinalRanking] = useState(false);
+  const [showWinnerToast, setShowWinnerToast] = useState(false);
+  const toastTimeoutRef = useRef<number | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Host settings
@@ -78,8 +142,45 @@ export default function Quiz() {
       if (nextRoundTimeout.current) {
         window.clearTimeout(nextRoundTimeout.current);
       }
+      if (timerInterval.current) {
+        window.clearInterval(timerInterval.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (gameState === 'gameover') {
+      stopTimerInterval();
+      if (nextRoundTimeout.current) {
+        window.clearTimeout(nextRoundTimeout.current);
+      }
+    }
+  }, [gameState]);
+
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+
+  useEffect(() => {
+    timeLeftRef.current = timeLeftMs;
+  }, [timeLeftMs]);
+
+  useEffect(() => {
+    elapsedRef.current = elapsedMs;
+  }, [elapsedMs]);
+
+  useEffect(() => {
+    if (gameState !== 'gameover') return;
+    if (!user) return;
+    if (coinsAwardedRef.current) return;
+
+    const coinsPerCorrect = hardcoreMode ? 15 : 10;
+    const coinsToAdd = score * coinsPerCorrect;
+    if (coinsToAdd > 0) {
+      updateStats({ scoreToAdd: 0, coinsToAdd });
+    }
+    coinsAwardedRef.current = true;
+  }, [gameState, user, score, hardcoreMode, updateStats]);
 
 
   const connectMultiplayer = (name: string, roomId?: string) => {
@@ -104,6 +205,20 @@ export default function Quiz() {
 
         setPendingMaxRounds(msg.payload.room.maxRounds ?? 5);
         setPendingAlgos(msg.payload.room.allowedAlgos ?? ALGORITHMS);
+        setPendingMode(msg.payload.room.mode ?? 'classic');
+        setPendingHardcore(msg.payload.room.hardcore ?? false);
+        setPendingProgressive(msg.payload.room.progressive ?? true);
+        setPendingMarathon(msg.payload.room.marathon ?? false);
+        setPendingBaseGroup(msg.payload.room.baseGroup ?? 0);
+        setPendingPreset(msg.payload.room.preset ?? 'classic');
+
+        // Sync local game mode with room settings so UI matches when the round starts
+        const roomMode = msg.payload.room.mode ?? 'classic';
+        const roomHardcore = msg.payload.room.hardcore ?? false;
+        const computedGameMode = roomMode === 'time-trial'
+          ? (roomHardcore ? 'timer-hardcore' : 'timer')
+          : (roomHardcore ? 'hardcore' : 'normal');
+        setGameMode(computedGameMode);
 
         const meState = msg.payload.players.find((p: any) => p.id === msg.payload.me.id);
         setHasGuessed(meState?.hasGuessed ?? false);
@@ -198,32 +313,61 @@ export default function Quiz() {
     }
   };
 
-  const startRound = (hardcore = false, options?: { reset?: boolean }) => {
-    setHardcoreMode(hardcore);
+  const startRound = (
+    mode: 'normal' | 'hardcore' | 'timer' | 'timer-hardcore' = 'normal',
+    options?: { reset?: boolean }
+  ) => {
+    setGameMode(mode);
     setSelectedAlgo(null);
     setHasGuessed(false);
     setNewUnlock(null);
 
+    const isTimerMode = mode === 'timer' || mode === 'timer-hardcore';
+    const isHardcore = mode === 'hardcore' || mode === 'timer-hardcore';
+
     let nextRound: number;
     if (options?.reset) {
       setScore(0);
+      scoreRef.current = 0;
+      coinsAwardedRef.current = false;
       setRound(1);
       nextRound = 1;
+
+      if (isTimerMode) {
+        setTimeLeftMs(60_000);
+        timeLeftRef.current = 60_000;
+        startTimerInterval(true);
+      } else {
+        setElapsedMs(0);
+        elapsedRef.current = 0;
+        startTimerInterval(false);
+      }
     } else {
       nextRound = round + 1;
       setRound(nextRound);
-    }
 
-    // Check if a new algorithm group unlocks at this round
-    const interval = hardcore ? 15 : 10;
-    if (!options?.reset && nextRound % interval === 0) {
-      const groupIdx = Math.floor(nextRound / interval);
-      if (groupIdx < ALGO_PROGRESSION.length) {
-        setNewUnlock(ALGO_PROGRESSION[groupIdx]);
+      if (isTimerMode) {
+        startTimerInterval(true);
+      } else {
+        startTimerInterval(false);
       }
     }
 
-    const currentProgAlgos = getProgressiveAlgos(nextRound, hardcore);
+    // Check if a new algorithm group unlocks at this round (non-timer modes)
+    if (!options?.reset && !isTimerMode) {
+      const interval = isHardcore ? 15 : 10;
+      if (nextRound % interval === 0) {
+        const groupIdx = Math.floor(nextRound / interval);
+        if (groupIdx < ALGO_PROGRESSION.length) {
+          setNewUnlock(ALGO_PROGRESSION[groupIdx]);
+        }
+      }
+    }
+
+    const currentProgAlgos = isTimerMode
+      ? getTimerProgressiveAlgos(scoreRef.current, isHardcore)
+      : getProgressiveAlgos(nextRound, isHardcore);
+
     handleStartRound(
       currentProgAlgos[Math.floor(Math.random() * currentProgAlgos.length)],
       generateRandomArray(40)
@@ -245,18 +389,46 @@ export default function Quiz() {
     }
 
     playbackRef.current = false;
+    stopTimerInterval();
 
     if (algo === currentAlgo) {
       confetti({
         particleCount: 100, spread: 70, origin: { y: 0.6 },
         colors: ['#8B5CF6', '#D946EF', '#ffffff']
       });
-      setScore(s => s + 1);
 
-      // Award coins to logged-in user
-      if (user) {
-        const coinsPerCorrect = hardcoreMode ? 15 : 10;
-        updateStats({ scoreToAdd: 1, coinsToAdd: coinsPerCorrect });
+      // Stop timer while feedback is displayed
+      stopTimerInterval();
+
+      const nextScore = scoreRef.current + 1;
+      const prevGroup = timerMode ? getTimerUnlockGroupIndex(scoreRef.current, hardcoreMode) : -1;
+      const nextGroup = timerMode ? getTimerUnlockGroupIndex(nextScore, hardcoreMode) : -1;
+
+      setScore(nextScore);
+      scoreRef.current = nextScore;
+      if (timerMode && nextGroup > prevGroup && nextGroup < ALGO_PROGRESSION.length) {
+        setNewUnlock(ALGO_PROGRESSION[nextGroup]);
+      }
+
+      // No pop-up after correct answers (Classic and Time Trial)
+      playbackRef.current = false;
+
+      if (nextRoundTimeout.current) {
+        window.clearTimeout(nextRoundTimeout.current);
+      }
+      nextRoundTimeout.current = window.setTimeout(() => {
+        if (!isComponentMounted.current) return;
+        startRound(gameMode);
+      }, 700);
+
+      return;
+    }
+
+    // In timer mode, stop the timer while showing feedback, then resume
+    if (timerMode) {
+      if (timerInterval.current) {
+        window.clearInterval(timerInterval.current);
+        timerInterval.current = null;
       }
 
       if (nextRoundTimeout.current) {
@@ -264,9 +436,12 @@ export default function Quiz() {
       }
       nextRoundTimeout.current = window.setTimeout(() => {
         if (!isComponentMounted.current) return;
-        startRound(hardcoreMode);
+        if (timeLeftRef.current <= 0) {
+          setGameState('gameover');
+        } else {
+          startRound(gameMode);
+        }
       }, 700);
-
       return;
     }
 
@@ -290,11 +465,21 @@ export default function Quiz() {
 
   const sendRoomOptions = () => {
     if (!socketRef.current) return;
+
+    const isMultiplayer = room && room.players && room.players.length > 1;
+    const modeToSend = isMultiplayer ? 'classic' : pendingMode;
+
     socketRef.current.send(JSON.stringify({
       type: "setRoomOptions",
       payload: {
         maxRounds: pendingMaxRounds,
         allowedAlgos: pendingAlgos,
+        mode: modeToSend,
+        hardcore: pendingHardcore,
+        progressive: pendingProgressive,
+        preset: pendingPreset,
+        marathon: pendingMarathon,
+        baseGroup: pendingBaseGroup,
       },
     }));
   };
@@ -316,7 +501,18 @@ export default function Quiz() {
   const submitScore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!playerName.trim() || createScore.isPending) return;
-    await createScore.mutateAsync({ playerName, score });
+
+    const mode = timerMode
+      ? hardcoreMode
+        ? 'time-trial-hc'
+        : 'time-trial'
+      : hardcoreMode
+        ? 'classic-hc'
+        : 'classic';
+
+    const timeMs = timerMode ? timeLeftMs : elapsedMs;
+
+    await createScore.mutateAsync({ playerName, score, mode, timeMs });
     navigate('/leaderboard');
   };
 
@@ -328,6 +524,16 @@ export default function Quiz() {
   const readyCount = players.filter(p => p.ready).length;
   // In multiplayer use room's allowed algos; in solo use the progressive list
   const visibleAlgos = (room?.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : progressiveAlgos) as AlgorithmName[];
+  const isLobby = gameState === 'idle' || (gameState === 'multiplayer' && room?.status === 'waiting');
+  const isMultiplayer = gameState === 'multiplayer' && room?.players?.length > 1;
+
+  const headerTitle = isLobby
+    ? gameState === 'idle'
+      ? 'Choix du mode'
+      : 'Lobby'
+    : room
+      ? `Room: ${room.id}${room.round ? ` · ${room.round}/${room.maxRounds}` : ""}`
+      : `Score: ${score}${round ? ` · R${round}` : ""}${timerMode ? ` · ${formatTime(timeLeftMs)}` : ` · ${formatTime(elapsedMs)}`}`;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-3 sm:p-4 md:p-6">
@@ -336,18 +542,36 @@ export default function Quiz() {
         {/* Header */}
         <div className="flex justify-between items-center glass-panel px-3 sm:px-6 py-3 sm:py-4 rounded-2xl">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            <Link
-              href="/"
-              className="flex items-center gap-1 sm:gap-2 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            >
-              <ArrowLeft size={18} />
-              <span className="text-sm hidden sm:inline">Retour</span>
-            </Link>
+            {isLobby ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (gameState === 'idle') {
+                    navigate('/');
+                  } else {
+                    setGameState('idle');
+                    setRoom(null);
+                    setPlayers([]);
+                    setMyId("");
+                  }
+                }}
+                className="flex items-center gap-1 sm:gap-2 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <ArrowLeft size={18} />
+                <span className="text-sm hidden sm:inline">Retour</span>
+              </button>
+            ) : (
+              <Link
+                href="/"
+                className="flex items-center gap-1 sm:gap-2 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <ArrowLeft size={18} />
+                <span className="text-sm hidden sm:inline">Retour</span>
+              </Link>
+            )}
             <div className="text-base sm:text-xl font-bold flex items-center gap-2 min-w-0">
               <span className="truncate">
-                {room
-                  ? `Room: ${room.id}${room.round ? ` · ${room.round}/${room.maxRounds}` : ""}`
-                  : `Score: ${score}${round ? ` · R${round}` : ""}`}
+                {headerTitle}
               </span>
               {hardcoreMode && (
                 <span className="text-xs font-bold uppercase tracking-widest text-destructive bg-destructive/10 px-2 py-0.5 rounded-full border border-destructive/30 shrink-0">
@@ -379,20 +603,28 @@ export default function Quiz() {
           </div>
         </div>
 
-        {/* Visualizer */}
+        {/* Lobby / Visualizer */}
         <div className="relative">
-          {(gameState === 'idle' || (gameState === 'multiplayer' && room?.status === 'waiting')) && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm rounded-2xl p-4 sm:p-6 space-y-3">
+          {isLobby ? (
+            <div className="glass-panel rounded-2xl p-4 sm:p-6 space-y-3 flex flex-col items-center">
               {gameState === 'idle' ? (
                 <>
-                  <button onClick={() => startRound(false, { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
-                    <Play size={22} /> Mode Normal
+                  <button onClick={() => startRound('normal', { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-primary text-primary-foreground hover-elevate shadow-lg shadow-primary/20 flex items-center justify-center gap-2">
+                    <Play size={22} /> Normal
                   </button>
                   <p className="text-xs text-muted-foreground text-center -mt-1">Commence avec 5 algos — +1 groupe toutes les 10 manches</p>
-                  <button onClick={() => startRound(true, { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
-                    <EyeOff size={22} /> Mode Hardcore
+                  <button onClick={() => startRound('hardcore', { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-destructive/80 text-white hover-elevate shadow-lg shadow-destructive/20 flex items-center justify-center gap-2">
+                    <EyeOff size={22} /> Hardcore
                   </button>
                   <p className="text-xs text-muted-foreground text-center -mt-1">Pas de visuel — +1 groupe toutes les 15 manches</p>
+                  <button onClick={() => startRound('timer', { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-emerald-500 text-white hover-elevate flex items-center justify-center gap-2">
+                    <Play size={22} /> Contre la montre
+                  </button>
+                  <p className="text-xs text-muted-foreground text-center -mt-1">60s — +1 groupe tous les 3 manches</p>
+                  <button onClick={() => startRound('timer-hardcore', { reset: true })} className="w-full max-w-xs px-6 sm:px-8 py-3 sm:py-4 rounded-xl font-bold text-lg sm:text-xl bg-red-600 text-white hover-elevate flex items-center justify-center gap-2">
+                    <EyeOff size={22} /> Contre la montre HC
+                  </button>
+                  <p className="text-xs text-muted-foreground text-center -mt-1">60s — Pas de visuel — progression plus lente</p>
                   <div className="w-full max-w-xs space-y-2 pt-1">
                     <input 
                       type="text" value={playerName} onChange={e => setPlayerName(e.target.value)} 
@@ -430,7 +662,7 @@ export default function Quiz() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     {players.map(p => (
-                      <div key={p.id} className="flex items-center gap-2 glass-panel p-3 rounded-xl">
+                      <div key={p.id} className={`flex items-center gap-2 glass-panel p-3 rounded-xl ${p.eliminated ? 'opacity-50' : ''}`}>
                         <div className="flex items-center gap-2 flex-1">
                           <User size={16} />
                           <span className="flex-1 text-left truncate">{p.name}</span>
@@ -439,13 +671,22 @@ export default function Quiz() {
                               <Crown size={14} /> Host
                             </span>
                           )}
+                          {p.eliminated && (
+                            <span className="text-xs font-semibold text-destructive">Éliminé</span>
+                          )}
                         </div>
-                        {isHost && p.id !== myId && (
+                        {isHost && p.id !== myId && !p.eliminated && (
                           <button onClick={() => kickPlayer(p.id)} className="p-1 rounded hover:bg-white/10">
                             <X size={16} />
                           </button>
                         )}
-                        {p.ready ? <CheckCircle2 className="text-success" size={16} /> : <div className="w-4 h-4 rounded-full border-2 border-white/20" />}
+                        {p.eliminated ? (
+                          <div className="text-xs font-semibold text-destructive">❌</div>
+                        ) : p.ready ? (
+                          <CheckCircle2 className="text-success" size={16} />
+                        ) : (
+                          <div className="w-4 h-4 rounded-full border-2 border-white/20" />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -461,6 +702,71 @@ export default function Quiz() {
                         </div>
                         {settingsOpen && (
                           <div className="mt-3 space-y-3">
+                            <div className="space-y-2">
+                              <div className="text-xs font-semibold text-muted-foreground">Preset</div>
+                              <div className="flex flex-wrap gap-2">
+                                {[
+                                  { id: 'classic', label: 'Classic / easy', mode: 'classic', hardcore: false, progressive: false, marathon: false, baseGroup: 1, rounds: 10, algos: [...ALGO_PROGRESSION[0], ...ALGO_PROGRESSION[1]] },
+                                  { id: 'noob', label: 'Noob', mode: 'classic', hardcore: false, progressive: false, marathon: false, baseGroup: 3, rounds: 15, algos: [...ALGO_PROGRESSION[0], ...ALGO_PROGRESSION[1], ...ALGO_PROGRESSION[2], ...ALGO_PROGRESSION[3]] },
+                                  { id: 'pro', label: 'Pro', mode: 'classic', hardcore: false, progressive: true, marathon: false, baseGroup: 3, rounds: 20, algos: [...ALGO_PROGRESSION[0], ...ALGO_PROGRESSION[1], ...ALGO_PROGRESSION[2], ...ALGO_PROGRESSION[3]] },
+                                  { id: 'hacker', label: 'Hacker', mode: 'classic', hardcore: false, progressive: false, marathon: false, baseGroup: 6, rounds: 20, algos: ALGORITHMS },
+                                ].map(preset => (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setPendingPreset(preset.id as any);
+                                      setPendingMode(preset.mode as any);
+                                      setPendingHardcore(preset.hardcore);
+                                      setPendingProgressive(preset.progressive);
+                                      setPendingMarathon(preset.marathon);
+                                      setPendingBaseGroup(preset.baseGroup);
+                                      setPendingMaxRounds(preset.rounds);
+                                      setPendingAlgos(preset.algos as AlgorithmName[]);
+                                    }}
+                                    className={`px-3 py-2 rounded-full text-xs font-semibold transition ${pendingPreset === preset.id ? 'bg-primary text-white' : 'bg-white/5 text-muted-foreground hover:bg-white/10'}`}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <label className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span>Mode</span>
+                                <select
+                                  value={pendingMode}
+                                  onChange={e => setPendingMode(e.target.value as any)}
+                                  className="ml-2 px-2 py-1 rounded-lg bg-black/20 border border-white/10 text-sm"
+                                >
+                                  <option value="classic">Classic</option>
+                                  <option value="time-trial" disabled={isMultiplayer}>Contre la montre</option>
+                                </select>
+                              </label>
+                              {isMultiplayer ? (
+                                <p className="text-[11px] text-muted-foreground mt-1">Le mode contre la montre est désactivé en multijoueur.</p>
+                              ) : null}
+                              <label className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span>Hardcore</span>
+                                <input
+                                  type="checkbox"
+                                  checked={pendingHardcore}
+                                  onChange={e => setPendingHardcore(e.target.checked)}
+                                  className="w-5 h-5"
+                                />
+                              </label>
+                              <label className="flex items-center justify-between text-xs text-muted-foreground">
+                                <span>Progressif</span>
+                                <input
+                                  type="checkbox"
+                                  checked={pendingProgressive}
+                                  onChange={e => setPendingProgressive(e.target.checked)}
+                                  className="w-5 h-5"
+                                />
+                              </label>
+                            </div>
+
                             <label className="flex items-center justify-between text-xs text-muted-foreground">
                               <span>Rounds</span>
                               <input
@@ -472,6 +778,7 @@ export default function Quiz() {
                                 className="w-20 px-2 py-1 rounded-lg bg-black/20 border border-white/10 text-sm"
                               />
                             </label>
+
                             <div>
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs text-muted-foreground">Choose algorithms</span>
@@ -492,7 +799,7 @@ export default function Quiz() {
                                   </button>
                                 </div>
                               </div>
-                              <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-2 p-2 bg-black/10 rounded-xl">
+                              <div className={`max-h-44 overflow-y-auto grid grid-cols-2 gap-2 p-2 rounded-xl ${pendingProgressive ? 'bg-white/5' : 'bg-black/10'}`}>
                                 {ALGORITHMS.map(algo => (
                                   <label key={algo} className="flex items-center gap-2 text-xs">
                                     <input
@@ -505,12 +812,16 @@ export default function Quiz() {
                                           setPendingAlgos(prev => prev.filter(a => a !== algo));
                                         }
                                       }}
+                                      disabled={pendingProgressive}
                                       className="w-4 h-4"
                                     />
-                                    <span className="truncate">{algo}</span>
+                                    <span className={`${pendingProgressive ? 'opacity-40' : ''} truncate`}>{algo}</span>
                                   </label>
                                 ))}
                               </div>
+                              {pendingProgressive && (
+                                <p className="text-xs text-muted-foreground mt-1">Progressif activé : les algorithmes se débloquent au fil des rounds.</p>
+                              )}
                             </div>
                             <button
                               onClick={sendRoomOptions}
@@ -579,8 +890,7 @@ export default function Quiz() {
                 </div>
               )}
             </div>
-          )}
-          {hardcoreMode && (gameState === 'playing' || gameState === 'guessing' || gameState === 'result') ? (
+          ) : hardcoreMode && (gameState === 'playing' || gameState === 'guessing' || gameState === 'result') ? (
             <div className="flex items-center justify-center h-40 sm:h-64 w-full rounded-2xl glass-panel bg-black/95 border border-destructive/30">
               <div className="text-center space-y-3">
                 <div className="text-4xl sm:text-5xl">🎧</div>
@@ -600,9 +910,15 @@ export default function Quiz() {
           <div className="flex items-center gap-2 px-3 py-1.5 glass-panel rounded-xl text-xs text-muted-foreground border border-white/5">
             <Unlock size={12} className="text-primary shrink-0" />
             <span>
-              {hardcoreMode ? 'HC' : 'Normal'}: {visibleAlgos.length} algos débloqués •{" "}
-              <span className="text-primary font-semibold">Round {nextUnlockRound}</span>{" "}
+              {timerMode ? (hardcoreMode ? 'TMR HC' : 'TMR') : (hardcoreMode ? 'HC' : 'Normal')}:
+              {` ${visibleAlgos.length} algos débloqués • `}
+              <span className="text-primary font-semibold">{timerMode ? 'Score' : 'Round'} {nextUnlockRound}</span>{" "}
               : +{(() => {
+                if (timerMode) {
+                  const thresholds = hardcoreMode ? [0, 4, 8, 11, 14, 17, 20] : [0, 3, 6, 9, 12, 15, 18];
+                  const nextGroupIdx = thresholds.findIndex(th => th === nextUnlockRound);
+                  return ALGO_PROGRESSION[nextGroupIdx]?.length ?? 0;
+                }
                 const interval = hardcoreMode ? 15 : 10;
                 const nextGroupIdx = Math.floor(nextUnlockRound / interval);
                 return ALGO_PROGRESSION[nextGroupIdx]?.length ?? 0;
@@ -612,15 +928,24 @@ export default function Quiz() {
         )}
 
         {/* Choices */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-          {visibleAlgos.map((algo: AlgorithmName) => {
+        {!isLobby && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
+            {visibleAlgos.map((algo: AlgorithmName) => {
             const isSelected = selectedAlgo === algo;
             const isCorrect = algo === currentAlgo;
             const canGuess = (gameState === 'playing' || gameState === 'guessing') && !hasGuessed;
             
             let btnClass = "glass-panel py-2.5 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-medium rounded-xl transition-all duration-300 ";
 
-            if (hasGuessed) {
+            if (timerMode && hasGuessed) {
+              if (isCorrect) {
+                btnClass += "bg-success/20 border-success text-success shadow-[0_0_15px_rgba(34,197,94,0.3)] scale-[1.02] z-10";
+              } else if (isSelected) {
+                btnClass += "bg-destructive/20 border-destructive text-destructive";
+              } else {
+                btnClass += "opacity-40";
+              }
+            } else if (hasGuessed) {
               if (isSelected) {
                 if (isCorrect) {
                   btnClass += "bg-success/20 border-success text-success shadow-[0_0_15px_rgba(34,197,94,0.3)] scale-[1.02] z-10";
@@ -651,6 +976,7 @@ export default function Quiz() {
             );
           })}
         </div>
+        )}
 
         {/* Round Result Overlay */}
         <AnimatePresence>
@@ -743,7 +1069,7 @@ export default function Quiz() {
                         setGameState('playing');
                         setSelectedAlgo(null);
                         setHasGuessed(false);
-                        startRound(hardcoreMode);
+                        startRound(gameMode);
                       }}
                       className="w-full px-6 py-3 rounded-xl bg-primary text-white font-bold hover:opacity-90"
                     >
@@ -842,14 +1168,17 @@ export default function Quiz() {
         {gameState === 'gameover' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/90 backdrop-blur-md overflow-y-auto">
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="glass-panel p-6 sm:p-8 rounded-3xl w-full max-w-md border-primary/20 text-center space-y-4 my-4">
-              <h2 className="text-3xl font-bold text-destructive">Game Over</h2>
+              <h2 className="text-3xl font-bold text-destructive">{timerMode ? "Time's up!" : "Game Over"}</h2>
               <div className="space-y-1">
                 <p className="text-muted-foreground">Score final</p>
                 <p className="text-5xl font-black text-primary">{score}</p>
+                {!timerMode && currentAlgo && (
+                  <p className="text-sm text-muted-foreground">Dernier tri : <span className="text-foreground font-semibold">{currentAlgo}</span></p>
+                )}
               </div>
 
-              {/* Coins earned summary */}
-              {user && score > 0 && (
+              {/* Coins earned summary (not in timer modes) */}
+              {user && score > 0 && !timerMode && (
                 <div className="flex items-center justify-center gap-2 py-2 px-4 bg-yellow-500/10 text-yellow-400 rounded-xl border border-yellow-500/20 text-sm font-semibold">
                   <span>🪙</span>
                   <span>+{score * (hardcoreMode ? 15 : 10)} coins gagnés !</span>
@@ -863,7 +1192,10 @@ export default function Quiz() {
                   <p className="font-semibold text-foreground mb-1 flex items-center gap-1">
                     <Unlock size={12} /> Algorithmes débloqués ({visibleAlgos.length}/{ALGORITHMS.length})
                   </p>
-                  <p>Mode {hardcoreMode ? 'Hardcore' : 'Normal'} — nouveau groupe toutes les {hardcoreMode ? 15 : 10} manches</p>
+                  <p>
+                    Mode {timerMode ? (hardcoreMode ? 'Contre la montre HC' : 'Contre la montre') : (hardcoreMode ? 'Hardcore' : 'Normal')} —
+                    nouveau groupe toutes les {timerMode ? (hardcoreMode ? 4 : 3) : (hardcoreMode ? 15 : 10)} manches
+                  </p>
                 </div>
               )}
 
@@ -879,7 +1211,7 @@ export default function Quiz() {
                   <button
                     type="button"
                     onClick={() => {
-                      startRound(hardcoreMode, { reset: true });
+                      startRound(gameMode, { reset: true });
                       setGameState('playing');
                     }}
                     className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"

@@ -6,12 +6,16 @@ export interface Score {
   id: number;
   playerName: string;
   score: number;
+  mode: string;
+  timeMs: number;
   createdAt: string;
 }
 
 export interface ScoreInput {
   playerName: string;
   score: number;
+  mode?: string;
+  timeMs?: number;
 }
 
 export function useScores() {

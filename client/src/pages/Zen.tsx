@@ -162,7 +162,7 @@ export default function Zen() {
             className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft size={20} />
-            Back to Home
+            Back
           </Link>
           <h1 className="text-3xl font-bold">Zen Mode</h1>
           <div className="flex items-center gap-4">

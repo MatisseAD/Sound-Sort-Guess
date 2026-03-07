@@ -5,7 +5,7 @@ import { api, ws as wsSchema } from "@shared/routes";
 import { registerSchema, loginSchema, type Utilisateur } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
-import { ALGORITHMS, generateRandomArray } from "../client/src/lib/sorting";
+import { ALGORITHMS, generateRandomArray, getProgressiveAlgos, getTimerProgressiveAlgos } from "../client/src/lib/sorting";
 import { nanoid, customAlphabet } from "nanoid";
 import { hashPassword, verifyPassword } from "./auth";
 import rateLimit from "express-rate-limit";
@@ -47,10 +47,16 @@ export async function registerRoutes(
     maxRounds: number;
     ownerId: string;
     allowedAlgos: string[];
+    mode: "classic" | "time-trial";
+    hardcore: boolean;
+    progressive: boolean;
+    preset?: string;
+    marathon: boolean;
+    baseGroup: number;
     currentAlgo?: string;
     array?: number[];
     roundTimeout?: ReturnType<typeof setTimeout>;
-    players: Map<string, { id: string, name: string, score: number, ready: boolean, hasGuessed: boolean, socket: Client }>;
+    players: Map<string, { id: string, name: string, score: number, ready: boolean, hasGuessed: boolean, eliminated: boolean, socket: Client }>;
   }>();
 
   wss.on("connection", (ws: Client) => {
@@ -72,6 +78,12 @@ export async function registerRoutes(
               maxRounds: MAX_ROUNDS,
               ownerId: playerId,
               allowedAlgos: [...ALGORITHMS],
+              mode: "classic",
+              hardcore: false,
+              progressive: true,
+              preset: "classic",
+              marathon: false,
+              baseGroup: 0,
               players: new Map(),
             });
           }
@@ -88,9 +100,10 @@ export async function registerRoutes(
             score: 0,
             ready: false,
             hasGuessed: false,
+            eliminated: false,
             socket: ws
           });
-          
+
           broadcastRoom(roomId);
         }
 
@@ -123,9 +136,28 @@ export async function registerRoutes(
         if (message.type === "setRoomOptions" && ws.roomId && ws.id) {
           const room = rooms.get(ws.roomId);
           if (room && room.ownerId === ws.id && room.status === "waiting") {
-            const { maxRounds, allowedAlgos } = wsSchema.send.setRoomOptions.parse(message.payload);
+            const { maxRounds, allowedAlgos, mode, hardcore, progressive, preset, marathon, baseGroup } = wsSchema.send.setRoomOptions.parse(message.payload);
             if (typeof maxRounds === "number") {
               room.maxRounds = Math.max(1, Math.min(MAX_ROUNDS, maxRounds));
+            }
+
+            if (typeof mode === "string") {
+              room.mode = mode;
+            }
+            if (typeof hardcore === "boolean") {
+              room.hardcore = hardcore;
+            }
+            if (typeof progressive === "boolean") {
+              room.progressive = progressive;
+            }
+            if (typeof preset === "string") {
+              room.preset = preset;
+            }
+            if (typeof marathon === "boolean") {
+              room.marathon = marathon;
+            }
+            if (typeof baseGroup === "number") {
+              room.baseGroup = Math.max(0, Math.min(6, baseGroup));
             }
 
             if (Array.isArray(allowedAlgos) && allowedAlgos.length) {
@@ -161,7 +193,7 @@ export async function registerRoutes(
           if (room && room.status === "playing") {
             const { algo } = wsSchema.send.guess.parse(message.payload);
             const player = room.players.get(ws.id);
-            if (!player || player.hasGuessed) return;
+            if (!player || player.hasGuessed || player.eliminated) return;
 
             player.hasGuessed = true;
 
@@ -171,9 +203,27 @@ export async function registerRoutes(
               return;
             }
 
-            // End round if everyone has guessed.
-            const allGuessed = Array.from(room.players.values()).every(p => p.hasGuessed);
-            if (allGuessed) {
+            // Marathon: eliminate on wrong guess.
+            if (room.marathon) {
+              player.eliminated = true;
+            }
+
+            // End round if everyone has guessed (or is eliminated) 
+            const everyoneDone = Array.from(room.players.values()).every(p => p.hasGuessed || p.eliminated);
+            if (everyoneDone) {
+              // In marathon mode, declare winner when one remains.
+              if (room.marathon) {
+                const alive = Array.from(room.players.values()).filter(p => !p.eliminated);
+                if (alive.length === 1) {
+                  endRound(ws.roomId, alive[0].name);
+                  return;
+                }
+                if (alive.length === 0) {
+                  endRound(ws.roomId, undefined);
+                  return;
+                }
+              }
+
               endRound(ws.roomId, undefined);
               return;
             }
@@ -246,7 +296,8 @@ export async function registerRoutes(
         name: p.name,
         score: p.score,
         ready: p.ready,
-        hasGuessed: p.hasGuessed
+        hasGuessed: p.hasGuessed,
+        eliminated: p.eliminated,
       }));
       
       room.players.forEach(p => {
@@ -254,7 +305,20 @@ export async function registerRoutes(
           p.socket.send(JSON.stringify({
             type: "roomUpdate",
             payload: {
-              room: { id: room.id, status: room.status, round: room.round, maxRounds: room.maxRounds, ownerId: room.ownerId, allowedAlgos: room.allowedAlgos },
+              room: {
+                id: room.id,
+                status: room.status,
+                round: room.round,
+                maxRounds: room.maxRounds,
+                ownerId: room.ownerId,
+                allowedAlgos: room.allowedAlgos,
+                mode: room.mode,
+                hardcore: room.hardcore,
+                progressive: room.progressive,
+                preset: room.preset,
+                marathon: room.marathon,
+                baseGroup: room.baseGroup,
+              },
               players: playersList,
               me: { id: p.id }
             }
@@ -326,7 +390,20 @@ export async function registerRoutes(
     }
 
     room.round += 1;
-    const availableAlgos = room.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : ALGORITHMS;
+    const hardcore = room.hardcore || false;
+    const mode = room.players.size > 1 ? "classic" : (room.mode || "classic");
+    const progressive = room.progressive ?? true;
+
+    const baseGroup = Math.max(0, Math.min(6, room.baseGroup ?? 0));
+    const interval = hardcore ? 15 : 10;
+    const effectiveRound = room.round + baseGroup * interval;
+
+    const availableAlgos = room.progressive
+      ? (mode === "time-trial"
+          ? getTimerProgressiveAlgos(effectiveRound, hardcore)
+          : getProgressiveAlgos(effectiveRound, hardcore))
+      : (room.allowedAlgos && room.allowedAlgos.length ? room.allowedAlgos : ALGORITHMS);
+
     const algo = availableAlgos[Math.floor(Math.random() * availableAlgos.length)];
     const array = generateRandomArray(40);
     room.status = "playing";
@@ -337,6 +414,9 @@ export async function registerRoutes(
     room.players.forEach(p => {
       p.ready = false;
       p.hasGuessed = false;
+      if (!room.marathon) {
+        p.eliminated = false;
+      }
     });
 
     // Timeout: end round automatically after 90 seconds if nobody guesses correctly

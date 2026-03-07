@@ -84,6 +84,41 @@ export function getNextUnlockRound(round: number, hardcore: boolean): number | n
   return (currentGroup + 1) * interval;
 }
 
+// Timer mode progression: unlock all algorithms by ~20 rounds.
+// Normal timer: unlocks a new group every 3 rounds (all groups unlocked by round 18).
+// Hardcore timer: unlocks a new group at custom milestones to extend difficulty.
+const TIMER_UNLOCK_ROUNDS_NORMAL = [0, 3, 6, 9, 12, 15, 18];
+const TIMER_UNLOCK_ROUNDS_HARDCORE = [0, 4, 8, 11, 14, 17, 20];
+
+export function getTimerProgressiveAlgos(progress: number, hardcore: boolean): AlgorithmName[] {
+  const thresholds = hardcore ? TIMER_UNLOCK_ROUNDS_HARDCORE : TIMER_UNLOCK_ROUNDS_NORMAL;
+  // Find highest group index for which the progress is >= threshold
+  const maxGroup = thresholds.reduce((currentMax, threshold, index) => {
+    if (progress >= threshold) return index;
+    return currentMax;
+  }, 0);
+
+  const algos: AlgorithmName[] = [];
+  for (let i = 0; i <= Math.min(maxGroup, ALGO_PROGRESSION.length - 1); i++) {
+    algos.push(...ALGO_PROGRESSION[i]);
+  }
+  return algos;
+}
+
+export function getTimerNextUnlockRound(progress: number, hardcore: boolean): number | null {
+  const thresholds = hardcore ? TIMER_UNLOCK_ROUNDS_HARDCORE : TIMER_UNLOCK_ROUNDS_NORMAL;
+  const next = thresholds.find(th => th > progress);
+  return next ?? null;
+}
+
+export function getTimerUnlockGroupIndex(progress: number, hardcore: boolean): number {
+  const thresholds = hardcore ? TIMER_UNLOCK_ROUNDS_HARDCORE : TIMER_UNLOCK_ROUNDS_NORMAL;
+  return thresholds.reduce((currentMax, threshold, index) => {
+    if (progress >= threshold) return index;
+    return currentMax;
+  }, 0);
+}
+
 export function* bubbleSort(arr: number[]): Generator<SortState> {
   const a = [...arr];
   const n = a.length;

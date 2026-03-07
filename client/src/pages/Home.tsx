@@ -25,7 +25,7 @@ export default function Home() {
         </h1>
         
         <p className="text-base sm:text-xl md:text-2xl text-muted-foreground font-light leading-relaxed px-2">
-          Écoutez attentivement. Chaque algorithme de tri a sa propre mélodie. Saurez-vous deviner lequel joue ?
+          Écoutez attentivement. Chaque algorithme de tri a sa propre mélodie. Saurez-vous le reconnaître ?
         </p>
 
         {user ? (
@@ -55,17 +55,17 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="flex flex-row items-center justify-center gap-3">
             <Link
               href="/register"
-              className="w-full sm:w-auto px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 hover:-translate-y-0.5 transition-all duration-300"
+              className="flex-1 min-w-0 px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 bg-primary/10 text-primary hover:bg-primary/20 hover:-translate-y-0.5 transition-all duration-300"
             >
               <UserPlus size={18} />
               Créer un compte
             </Link>
             <Link
               href="/login"
-              className="w-full sm:w-auto px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 glass-panel hover:bg-white/5 hover:-translate-y-0.5 transition-all duration-300"
+              className="flex-1 min-w-0 px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 glass-panel hover:bg-white/5 hover:-translate-y-0.5 transition-all duration-300"
             >
               <LogIn size={18} />
               Se connecter
