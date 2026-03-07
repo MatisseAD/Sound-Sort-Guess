@@ -11,6 +11,8 @@ import Quiz from "./pages/Quiz";
 import Leaderboard from "./pages/Leaderboard";
 import Zen from "./pages/Zen";
 import Shop from "./pages/Shop";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 
 function Router() {
   return (
@@ -20,6 +22,8 @@ function Router() {
       <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/zen" component={Zen} />
       <Route path="/shop" component={Shop} />
+      <Route path="/login" component={Login} />
+      <Route path="/register" component={Register} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>
