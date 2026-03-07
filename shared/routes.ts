@@ -19,6 +19,8 @@ export const publicUserSchema = z.object({
   pointsBoutiques: z.number().nullable(),
   createdAt: z.string(),
   lastLogin: z.string().nullable(),
+  purchasedItems: z.array(z.string()).nullable(),
+  equippedTheme: z.string().nullable(),
 });
 
 export type PublicUser = z.infer<typeof publicUserSchema>;
@@ -75,6 +77,39 @@ export const api = {
       path: '/api/auth/me' as const,
       responses: {
         200: publicUserSchema,
+        401: errorSchemas.validation,
+      },
+    },
+  },
+  user: {
+    updateStats: {
+      method: 'POST' as const,
+      path: '/api/user/stats' as const,
+      input: z.object({ scoreToAdd: z.number().int().min(0), coinsToAdd: z.number().int().min(0) }),
+      responses: {
+        200: publicUserSchema,
+        401: errorSchemas.validation,
+      },
+    },
+  },
+  shop: {
+    buy: {
+      method: 'POST' as const,
+      path: '/api/shop/buy' as const,
+      input: z.object({ itemId: z.string() }),
+      responses: {
+        200: publicUserSchema,
+        400: errorSchemas.validation,
+        401: errorSchemas.validation,
+      },
+    },
+    equip: {
+      method: 'POST' as const,
+      path: '/api/shop/equip' as const,
+      input: z.object({ itemId: z.string() }),
+      responses: {
+        200: publicUserSchema,
+        400: errorSchemas.validation,
         401: errorSchemas.validation,
       },
     },

@@ -2,13 +2,14 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { api, ws as wsSchema } from "@shared/routes";
-import { registerSchema, loginSchema } from "@shared/schema";
+import { registerSchema, loginSchema, type Utilisateur } from "@shared/schema";
 import { z } from "zod";
 import { WebSocketServer, WebSocket } from "ws";
 import { ALGORITHMS, generateRandomArray } from "../client/src/lib/sorting";
 import { nanoid, customAlphabet } from "nanoid";
 import { hashPassword, verifyPassword } from "./auth";
 import rateLimit from "express-rate-limit";
+import { SHOP_ITEMS } from "../client/src/lib/shop";
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -343,6 +344,21 @@ export async function registerRoutes(
 
     broadcast(roomId, "gameStart", { algo, array, round: room.round, maxRounds: room.maxRounds });
   }
+
+  function serializeUser(user: Utilisateur) {
+    return {
+      id: user.id,
+      pseudo: user.pseudo,
+      mail: user.mail,
+      score: user.score,
+      pointsBoutiques: user.pointsBoutiques,
+      createdAt: user.createdAt.toISOString(),
+      lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
+      purchasedItems: JSON.parse(user.purchasedItems ?? "[]") as string[],
+      equippedTheme: user.equippedTheme ?? "default",
+    };
+  }
+
   app.get(api.scores.list.path, async (req, res) => {
     const scoresList = await storage.getScores();
     res.json(scoresList);
@@ -388,15 +404,7 @@ export async function registerRoutes(
 
       req.session.userId = user.id;
 
-      return res.status(201).json({
-        id: user.id,
-        pseudo: user.pseudo,
-        mail: user.mail,
-        score: user.score,
-        pointsBoutiques: user.pointsBoutiques,
-        createdAt: user.createdAt.toISOString(),
-        lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
-      });
+      return res.status(201).json(serializeUser(user));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -427,16 +435,11 @@ export async function registerRoutes(
       req.session.userId = user.id;
 
       const updatedUser = await storage.getUtilisateurById(user.id);
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Erreur interne." });
+      }
 
-      return res.status(200).json({
-        id: user.id,
-        pseudo: user.pseudo,
-        mail: user.mail,
-        score: user.score,
-        pointsBoutiques: user.pointsBoutiques,
-        createdAt: user.createdAt.toISOString(),
-        lastLogin: updatedUser?.lastLogin ? updatedUser.lastLogin.toISOString() : null,
-      });
+      return res.status(200).json(serializeUser(updatedUser));
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -464,15 +467,71 @@ export async function registerRoutes(
     if (!user) {
       return res.status(401).json({ message: "Utilisateur introuvable." });
     }
-    return res.status(200).json({
-      id: user.id,
-      pseudo: user.pseudo,
-      mail: user.mail,
-      score: user.score,
-      pointsBoutiques: user.pointsBoutiques,
-      createdAt: user.createdAt.toISOString(),
-      lastLogin: user.lastLogin ? user.lastLogin.toISOString() : null,
-    });
+    return res.status(200).json(serializeUser(user));
+  });
+
+  // User: Update stats after a game
+  app.post(api.user.updateStats.path, async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Non authentifié." });
+    }
+    try {
+      const { scoreToAdd, coinsToAdd } = api.user.updateStats.input.parse(req.body);
+      const user = await storage.updateUserStats(req.session.userId, scoreToAdd, coinsToAdd);
+      if (!user) {
+        return res.status(404).json({ message: "Utilisateur introuvable." });
+      }
+      return res.status(200).json(serializeUser(user));
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  // Shop: Buy an item
+  app.post(api.shop.buy.path, async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Non authentifié." });
+    }
+    try {
+      const { itemId } = api.shop.buy.input.parse(req.body);
+      const shopItem = SHOP_ITEMS.find(i => i.id === itemId);
+      if (!shopItem) {
+        return res.status(400).json({ message: "Article introuvable." });
+      }
+      const user = await storage.purchaseItem(req.session.userId, itemId, shopItem.price);
+      if (!user) {
+        return res.status(400).json({ message: "Coins insuffisants ou utilisateur introuvable." });
+      }
+      return res.status(200).json(serializeUser(user));
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  // Shop: Equip a theme
+  app.post(api.shop.equip.path, async (req, res) => {
+    if (!req.session.userId) {
+      return res.status(401).json({ message: "Non authentifié." });
+    }
+    try {
+      const { itemId } = api.shop.equip.input.parse(req.body);
+      const user = await storage.equipTheme(req.session.userId, itemId);
+      if (!user) {
+        return res.status(404).json({ message: "Utilisateur introuvable." });
+      }
+      return res.status(200).json(serializeUser(user));
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
   });
 
   // Seed database if empty

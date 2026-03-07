@@ -10,6 +10,7 @@ import Home from "./pages/Home";
 import Quiz from "./pages/Quiz";
 import Leaderboard from "./pages/Leaderboard";
 import Zen from "./pages/Zen";
+import Shop from "./pages/Shop";
 
 function Router() {
   return (
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/quiz" component={Quiz} />
       <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/zen" component={Zen} />
+      <Route path="/shop" component={Shop} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>
