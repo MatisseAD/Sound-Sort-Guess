@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertScoreSchema, scores, registerSchema, loginSchema } from './schema';
+import { insertScoreSchema, scores } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -10,20 +10,6 @@ export const errorSchemas = {
     message: z.string(),
   }),
 };
-
-export const publicUserSchema = z.object({
-  id: z.number(),
-  pseudo: z.string(),
-  mail: z.string(),
-  score: z.number().nullable(),
-  pointsBoutiques: z.number().nullable(),
-  createdAt: z.string(),
-  lastLogin: z.string().nullable(),
-  purchasedItems: z.array(z.string()).nullable(),
-  equippedTheme: z.string().nullable(),
-});
-
-export type PublicUser = z.infer<typeof publicUserSchema>;
 
 export const api = {
   scores: {
@@ -44,121 +30,6 @@ export const api = {
       },
     },
   },
-  auth: {
-    register: {
-      method: 'POST' as const,
-      path: '/api/auth/register' as const,
-      input: registerSchema,
-      responses: {
-        201: publicUserSchema,
-        400: errorSchemas.validation,
-        409: errorSchemas.validation,
-      },
-    },
-    login: {
-      method: 'POST' as const,
-      path: '/api/auth/login' as const,
-      input: loginSchema,
-      responses: {
-        200: publicUserSchema,
-        400: errorSchemas.validation,
-        401: errorSchemas.validation,
-      },
-    },
-    logout: {
-      method: 'POST' as const,
-      path: '/api/auth/logout' as const,
-      responses: {
-        200: z.object({ message: z.string() }),
-      },
-    },
-    me: {
-      method: 'GET' as const,
-      path: '/api/auth/me' as const,
-      responses: {
-        200: publicUserSchema,
-        401: errorSchemas.validation,
-      },
-    },
-  },
-  user: {
-    updateStats: {
-      method: 'POST' as const,
-      path: '/api/user/stats' as const,
-      input: z.object({ scoreToAdd: z.number().int().min(0), coinsToAdd: z.number().int().min(0) }),
-      responses: {
-        200: publicUserSchema,
-        401: errorSchemas.validation,
-      },
-    },
-  },
-  shop: {
-    buy: {
-      method: 'POST' as const,
-      path: '/api/shop/buy' as const,
-      input: z.object({ itemId: z.string() }),
-      responses: {
-        200: publicUserSchema,
-        400: errorSchemas.validation,
-        401: errorSchemas.validation,
-      },
-    },
-    equip: {
-      method: 'POST' as const,
-      path: '/api/shop/equip' as const,
-      input: z.object({ itemId: z.string() }),
-      responses: {
-        200: publicUserSchema,
-        400: errorSchemas.validation,
-        401: errorSchemas.validation,
-      },
-    },
-  },
-};
-
-export const ws = {
-  // Client to Server
-  send: {
-    joinRoom: z.object({ playerName: z.string(), roomId: z.string().optional() }),
-    ready: z.object({}),
-    startRound: z.object({}),
-    setRoomOptions: z.object({
-      maxRounds: z.number().int().min(1).max(20).optional(),
-      allowedAlgos: z.array(z.string()).min(1).optional(),
-      mode: z.enum(['classic', 'time-trial']).optional(),
-      hardcore: z.boolean().optional(),
-      progressive: z.boolean().optional(),
-      preset: z.string().optional(),
-      marathon: z.boolean().optional(),
-      baseGroup: z.number().int().min(0).max(6).optional(),
-    }),
-    kickPlayer: z.object({ playerId: z.string() }),
-    guess: z.object({ algo: z.string() }),
-    resetRoom: z.object({}),
-  },
-  // Server to Client
-  receive: {
-    roomUpdate: z.object({ 
-      room: z.object({
-        id: z.string(),
-        status: z.string(),
-        round: z.number(),
-        maxRounds: z.number(),
-        ownerId: z.string(),
-        allowedAlgos: z.array(z.string()),
-        mode: z.enum(['classic', 'time-trial']),
-        hardcore: z.boolean(),
-        progressive: z.boolean(),
-        preset: z.string().optional(),
-        marathon: z.boolean(),
-        baseGroup: z.number().int().min(0).max(6),
-      }),
-      players: z.array(z.any()),
-      me: z.any()
-    }),
-    gameStart: z.object({ algo: z.string(), array: z.array(z.number()), round: z.number().optional(), maxRounds: z.number().optional() }),
-    roundResult: z.object({ winner: z.string().optional(), correctAlgo: z.string(), round: z.number().optional(), maxRounds: z.number().optional(), players: z.array(z.any()) }),
-  }
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {
