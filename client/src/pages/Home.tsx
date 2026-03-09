@@ -37,7 +37,7 @@ export default function Home() {
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold truncate">{user.pseudo}</p>
-                  <p className="text-xs text-muted-foreground">Score : {user.score ?? 0} pts</p>
+                  <p className="text-xs text-muted-foreground">Score : {user.totalScore ?? 0} pts</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
